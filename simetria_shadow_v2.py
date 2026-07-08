@@ -1,3 +1,35 @@
+"""Post-processing/plotting script for the Weyl-coordinate Schwarzschild BH +
+Morgan-Morgan disk shadow simulation.
+
+Loads the precomputed Mat (impact-parameter/deflection magnitude) and Mz
+(z-related quantity) matrices produced by one of the ray tracers (e.g.
+test_Z_SHADOW.py / test2_Z_SHADOW.py / test_parallel_SHADOW.py /
+generate_matriz.py) via np.loadtxt, mirrors each quarter-plane result into a
+full-plane image (Mat2/Mz2, each twice the size of Mat/Mz) using index
+mirroring, classifies every pixel of the mirrored image into M2 (0 = neither,
+1 = captured by the black hole, 2 = beyond the disk), overlays marker
+annotations at fixed points of interest, and saves the resulting matplotlib
+figure to disk.
+
+This is a "v2" variant of simetria_shadow.py. Concrete differences observed
+in this version versus v1:
+  - After building M2, this script additionally crops it down to M3, keeping
+    only the bottom half of the rows (i.e. only one of the two mirrored
+    alfa-halves is plotted), whereas v1 plots the full M2 directly.
+  - The imshow extent/aspect and axis handling differ: v2 uses M3 with
+    aspect='equal' and turns the axes off entirely (plt.axis('off')) instead
+    of setting explicit ylim/title/labels like v1.
+  - v2 replaces most of v1's circle-patch markers (mpatches.Circle) with
+    plt.plot marker calls using distinct marker shapes/colors (triangle,
+    square, plus, cross) at the same points of interest; only the first blue
+    circle patch is kept as-is. The original circle-patch calls for the other
+    points are preserved below as a commented-out (triple-quoted) block
+    rather than removed.
+  - v2 saves the figure to a file ("M=0_4") via plt.savefig instead of
+    calling plt.show() as v1 does.
+"""
+
+# ===== Imports =====
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -6,6 +38,7 @@ import matplotlib.colors
 import matplotlib.patches as mpatches
 from matplotlib.figure import figaspect
 
+# ===== Load data =====
 Mat = np.loadtxt("Mat")
 Mz = np.loadtxt("Mz")
 
@@ -17,47 +50,53 @@ alfa = np.linspace(-np.arctan(10/15),np.arctan(10/15),1000)
 beta = np.linspace(np.arctan(10/15),-np.arctan(10/15),1000)
 
 
+# ===== Mirror to full plane =====
+#Duplicated: identical to the Mat2/Mz2 mirroring block in simetria_shadow.py
 Mat2 = np.zeros(( 2*len(Mat),2*len(Mat[0]) ))
 Mz2 = np.zeros(( 2*len(Mz),2*len(Mz[0]) ))
 
 
 for i in range(len(Mat)):
-	for j in range(len(Mat[0])):
-		Mat2[i,j] = Mat[i,j]
-		Mat2[i,-j-1] = Mat[i,j]
-		Mat2[-i-1,j] = Mat[i,j]
-		Mat2[-i-1,-j-1] = Mat[i,j]
+    for j in range(len(Mat[0])):
+        Mat2[i,j] = Mat[i,j]
+        Mat2[i,-j-1] = Mat[i,j]
+        Mat2[-i-1,j] = Mat[i,j]
+        Mat2[-i-1,-j-1] = Mat[i,j]
 
-		##Mz
-		Mz2[i,j] = Mz[i,j]
-		Mz2[i,-j-1] = Mz[i,j]
-		Mz2[-i-1,j] = - Mz[i,j]
-		Mz2[-i-1,-j-1] = - Mz[i,j]
+        ##Mz
+        Mz2[i,j] = Mz[i,j]
+        Mz2[i,-j-1] = Mz[i,j]
+        Mz2[-i-1,j] = - Mz[i,j]
+        Mz2[-i-1,-j-1] = - Mz[i,j]
 
 
+# ===== Classification =====
+#Duplicated: identical to the M2 classification loop in simetria_shadow.py
 M2 = np.zeros((len(Mat2),len(Mat2[0])))
 
 for i in range(len(Mat2)):
-	for j in range(len(Mat2[0])):
+    for j in range(len(Mat2[0])):
 
-		if (Mat2[i,j] <= 0.002):# and Mz[i,j] < M):
-    			M2[i,j] = 1
+        if (Mat2[i,j] <= 0.002):# and Mz[i,j] < M):
+            M2[i,j] = 1
 
-		elif ( Mat2[i,j] > b and (Mz2[i,j] > 49.0 or Mz2[i,j] < -49.0)):
-			M2[i,j] = 2    
-	  	
-		
-		else:
-    			M2[i,j] = 0
+        elif ( Mat2[i,j] > b and (Mz2[i,j] > 49.0 or Mz2[i,j] < -49.0)):
+            M2[i,j] = 2
+
+        else:
+            M2[i,j] = 0
 
 
+# Crop the mirrored classification grid down to its bottom half (rows
+# 500..999), keeping only one of the two mirrored alfa-halves for plotting.
 M3 = np.zeros((int(len(M2)/2),len(M2[0])))
 
 for i in range(int(len(M2)/2)):
-	for j in range(len(M2[0])):
-		M3[i,j] =  M2[i+500,j]
+    for j in range(len(M2[0])):
+        M3[i,j] =  M2[i+500,j]
 ## FIGURE ##
 
+# ===== Plotting + annotations =====
 #plt.figure(figsize = (22,22))
 fig,ax = plt.subplots(1,1,figsize=(30,30))
 
@@ -72,6 +111,8 @@ cm = matplotlib.colors.ListedColormap(c_map)
 plt.imshow(M3, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],0.0],aspect='equal')
 #plt.imshow(M2, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],alfa[-1]])
 ax.add_patch(mpatches.Circle((0.006,-0.005),0.007,color='blue'))
+# Commented-out (kept for reference): original v1-style circle-patch markers
+# for the other points of interest, superseded below by the plt.plot markers.
 """ax.add_patch(mpatches.Circle((0.006,-0.100),0.005,color='orange'))
 ax.add_patch(mpatches.Circle((0.006,-0.207),0.005,color='green'))
 ax.add_patch(mpatches.Circle((0.006,-0.220),0.005,color='red'))
@@ -94,5 +135,3 @@ plt.axis('off')
 
 #plt.show()
 plt.savefig("M=0_4")
-
-

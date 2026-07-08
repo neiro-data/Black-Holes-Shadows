@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# uv virtual environment (uv.lock and .python-version stay tracked)
+.venv/
+
+# Generated matrices and figures from running the simulation scripts
+# (np.savetxt output like Mat, Mz, Mthet, Mphi, Mat_nu_disk*, Mat_constA_*, and plt.savefig
+# figures like Test, Schwarzschild_Weyl_coords_*, Schwarzschild_WeylCoords_lensing_*, M=0_4
+# have no consistent/predictable extension and are NOT reliably covered by the rules below —
+# review `git status` manually before committing to make sure no unwanted generated data slips in,
+# and to make sure no *wanted* input file gets accidentally excluded).
+*.png
+*.pdf
+*.svg
+
+# SLURM job output (per my_job.sbatch)
+job_test*.out
+job_test*.err
+*.out
+*.err
+
+# OS cruft
+.DS_Store
+
+# Editor/IDE local settings
+.vscode/
+.idea/
+
+# SLURM submit script (machine-specific, kept local only)
+my_job.sbatch
