@@ -330,6 +330,73 @@ non-jitted wrappers that delegate to the free functions, satisfying the
   not regressions from this split.
 - `ast.parse` syntax check on all four updated consumer scripts.
 
+## Interaction 7
+
+Extracted the duplicated mirroring/classification logic from the three
+plotting/post-processing scripts into a new shared module,
+`shadow_postprocess.py`, and cleaned up remaining internal dead code left
+in `generate_matriz.py` and the three plotting scripts. This does for the
+post-processing layer what Interaction 4 did for the ray-tracer physics
+core.
+
+### What moved
+
+New module **`shadow_postprocess.py`** with two vectorized, side-effect-free
+numpy functions:
+- **`mirror_quadrants(A, antisymmetric=False)`** — reflects a ray-traced
+  quarter-plane array across both axes into the full 2N x 2M plane
+  (top-left = A, top-right/bottom-left/bottom-right mirrored accordingly);
+  `antisymmetric=True` negates the z-mirrored bottom half, for quantities
+  like `Mz` that flip sign under z -> -z.
+- **`classify_shadow(mat, mz, b, capture_r=0.002, mz_escape=49.0,
+  unshift_mat=False, use_abs_z=True)`** — classifies each pixel as
+  captured (1) / beyond-disk (2) / neither (0), with `unshift_mat` and
+  `use_abs_z` flags to reproduce two real differences between the
+  scripts' original conventions (a +50 wraparound offset in one family's
+  `mat` output; whether the z-escape test uses `abs(mz)` or the raw
+  signed value) rather than silently "fixing" them into one behaviour.
+
+`simetria_shadow.py`, `simetria_shadow_v2.py`, and `symmetry.py` — each of
+which previously hand-rolled its own nested-loop mirroring and
+classification — were updated to call these two helpers instead.
+
+### `symmetry.py` physics-helper deduplication
+
+`symmetry.py` also carried its own full copy-pasted set of physics helpers
+(`d1`, `d2`, `xi2`, `nuD`, `nu`, `gpp` and the non-jitted `_i` variants) —
+the same duplication `weyl_core.py`/`general_methods` already solved for
+the ray tracers and `generate_matriz.py` (Interactions 4 and 6). These were
+deleted from `symmetry.py` and replaced with `import general_methods` /
+`from general_methods import *`, matching the pattern already used by
+`generate_matriz.py`.
+
+### `generate_matriz.py` dead-code removal
+
+Removed two legacy commented-out earlier versions of `lamb_Mat`, a
+commented-out alternate `np.savetxt` call, and five now-unused imports
+(`math`, `matplotlib.pyplot`, `matplotlib.colors`, `time`, `cmath`).
+
+### Other dead code removed
+
+Assorted disabled/commented-out alternates in the three plotting scripts,
+in the same spirit as Interaction 5's cleanup of the ray tracers:
+disabled alternate `plt.figure`/colormap/label/tick_params/savefig calls
+in `simetria_shadow.py`; a commented circle-patch block plus disabled
+alternates in `simetria_shadow_v2.py`; and two large legacy classification
+blocks plus commented alternates in `symmetry.py`.
+
+### Verification
+
+No behavior changed anywhere. Verified via numeric-equivalence testing
+against pre-refactor logic: the old manual mirroring/classification loops
+from each of the three scripts were compared against the new
+`mirror_quadrants`/`classify_shadow` calls on synthesized test arrays.
+
+### Docs updated
+
+Updated `README.md`'s Pipeline section to mention `shadow_postprocess.py`
+alongside the plotting scripts.
+
 ## Suggested next steps (not yet done)
 
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.

@@ -54,7 +54,11 @@ metric components, RKF45 integrator) consolidated into **`weyl_core.py`**
    **`symmetry.py`**, **`simetria_shadow.py`**, **`simetria_shadow_v2.py`**,
    **`lensing_image.py`**. `symmetry.py` in particular reconstructs the
    full image by mirroring a single ray-traced quadrant across both axes,
-   exploiting the z -> -z and angular sign symmetry of the setup.
+   exploiting the z -> -z and angular sign symmetry of the setup. The
+   shared quadrant-mirroring and pixel classification (captured /
+   beyond-disk / neither) logic for `symmetry.py`, `simetria_shadow.py`,
+   and `simetria_shadow_v2.py` lives in **`shadow_postprocess.py`**
+   (`mirror_quadrants`, `classify_shadow`).
 
 ### 2. Kerr-metric family
 
@@ -92,6 +96,14 @@ these differ meaningfully between scripts (shadow vs. lensing output,
 disk-crossing classification, serial vs. parallel) and were deliberately
 not merged; see `claude_interaction_steps.md` (Interactions 3 and 4) for
 the reasoning.
+
+The three plotting scripts (`symmetry.py`, `simetria_shadow.py`,
+`simetria_shadow_v2.py`) similarly duplicated their own quadrant-mirroring
+and pixel-classification loops; that logic now lives in
+**`shadow_postprocess.py`** (`mirror_quadrants`, `classify_shadow`), and
+`symmetry.py`'s copy-pasted physics helpers were deleted in favor of
+`general_methods`, same as the ray tracers — see `claude_interaction_steps.md`
+(Interaction 7).
 
 ## HPC
 

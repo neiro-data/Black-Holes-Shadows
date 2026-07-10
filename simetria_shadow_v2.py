@@ -38,6 +38,8 @@ import matplotlib.colors
 import matplotlib.patches as mpatches
 from matplotlib.figure import figaspect
 
+from shadow_postprocess import mirror_quadrants, classify_shadow
+
 # ===== Load data =====
 Mat = np.loadtxt("Mat")
 Mz = np.loadtxt("Mz")
@@ -51,40 +53,12 @@ beta = np.linspace(np.arctan(10/15),-np.arctan(10/15),1000)
 
 
 # ===== Mirror to full plane =====
-#Duplicated: identical to the Mat2/Mz2 mirroring block in simetria_shadow.py
-Mat2 = np.zeros(( 2*len(Mat),2*len(Mat[0]) ))
-Mz2 = np.zeros(( 2*len(Mz),2*len(Mz[0]) ))
-
-
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-        Mat2[i,j] = Mat[i,j]
-        Mat2[i,-j-1] = Mat[i,j]
-        Mat2[-i-1,j] = Mat[i,j]
-        Mat2[-i-1,-j-1] = Mat[i,j]
-
-        ##Mz
-        Mz2[i,j] = Mz[i,j]
-        Mz2[i,-j-1] = Mz[i,j]
-        Mz2[-i-1,j] = - Mz[i,j]
-        Mz2[-i-1,-j-1] = - Mz[i,j]
+Mat2 = mirror_quadrants(Mat)
+Mz2 = mirror_quadrants(Mz, antisymmetric=True)
 
 
 # ===== Classification =====
-#Duplicated: identical to the M2 classification loop in simetria_shadow.py
-M2 = np.zeros((len(Mat2),len(Mat2[0])))
-
-for i in range(len(Mat2)):
-    for j in range(len(Mat2[0])):
-
-        if (Mat2[i,j] <= 0.002):# and Mz[i,j] < M):
-            M2[i,j] = 1
-
-        elif ( Mat2[i,j] > b and (Mz2[i,j] > 49.0 or Mz2[i,j] < -49.0)):
-            M2[i,j] = 2
-
-        else:
-            M2[i,j] = 0
+M2 = classify_shadow(Mat2, Mz2, b)
 
 
 # Crop the mirrored classification grid down to its bottom half (rows
@@ -97,11 +71,9 @@ for i in range(int(len(M2)/2)):
 ## FIGURE ##
 
 # ===== Plotting + annotations =====
-#plt.figure(figsize = (22,22))
 fig,ax = plt.subplots(1,1,figsize=(30,30))
 
 
-#c_map = [[1,1,1],[0, 0, 0], [0.192, 0.192, 0.192]]
 c_map = [[0.505, 0.505, 0.505],[0, 0, 0], [1,1,1]]
 
 
@@ -109,15 +81,7 @@ cm = matplotlib.colors.ListedColormap(c_map)
 
 
 plt.imshow(M3, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],0.0],aspect='equal')
-#plt.imshow(M2, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],alfa[-1]])
 ax.add_patch(mpatches.Circle((0.006,-0.005),0.007,color='blue'))
-# Commented-out (kept for reference): original v1-style circle-patch markers
-# for the other points of interest, superseded below by the plt.plot markers.
-"""ax.add_patch(mpatches.Circle((0.006,-0.100),0.005,color='orange'))
-ax.add_patch(mpatches.Circle((0.006,-0.207),0.005,color='green'))
-ax.add_patch(mpatches.Circle((0.006,-0.220),0.005,color='red'))
-ax.add_patch(mpatches.Circle((0.006,-0.300),0.005,color='purple'))
-"""
 plt.plot(0.006, -0.100, 'v', color='orange', ms=20)
 plt.plot(0.006, -0.207, 's', color='green', ms=20)
 plt.plot(0.006, -0.220, '+', color='red', mew=5, ms=20)
@@ -125,13 +89,6 @@ plt.plot(0.006, -0.300, 'x', color='purple',mew=5, ms=20)
 
 
 
-#plt.xlabel("$\\beta$",size=84)
-#plt.ylabel("$\\alpha$",size=84)
 plt.axis('off')
-#plt.ylim(-np.arctan(10/15),0.0)
-#plt.tick_params(axis='both', which='major', labelsize=60)
 
-#plt.title("$m=$" + str(round(MD,1)),size=70)
-
-#plt.show()
 plt.savefig("M=0_4")

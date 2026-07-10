@@ -35,13 +35,8 @@ provenance). No behaviour was changed beyond the extraction itself.
 # In[25]:
 
 
-import math
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.colors
-import time
 from numba import jit
-import cmath
 import scipy.integrate as sci
 from scipy.optimize import fsolve
 
@@ -73,26 +68,6 @@ def lamb_Mat(rho, z, M, MD, b, m, hder):
 
     elif z < -limit:
         return sci.quad(dlamb, -40, z, (rho, M, MD, b, 1, m, hder))[0] + sci.quad(dlamb2, 40.0, rho, (-40.0, M, MD, b, 0, m, hder))[0] + lambSch(40.0, -40.0, M + MD, MD, b)
-
-
-
-# Legacy: earlier version of lamb_Mat that used a raw 1/r Newtonian falloff
-# (-2*(M+MD)/sqrt(40^2+40^2)) instead of the closed-form lambSch boundary
-# value above. Superseded, kept for reference.
-"""
-@jit
-def lamb_Mat(rho,z,M,MD,b,m,hder):
-    limit = 0.0
-    if z >= limit:
-        return sci.quad(dlamb,40.0,z,(rho,M,MD,b,1,m,hder))[0] + sci.quad(dlamb2,40.0,rho,(40.0,M,MD,b,0,m,hder))[0] -2*(M+MD)/np.sqrt(40.0**2+40.0**2)
-
-    elif z < -limit:
-        return sci.quad(dlamb,-40,z,(rho,M,MD,b,1,m,hder))[0] + sci.quad(dlamb2,40.0,rho,(-40.0,M,MD,b,0,m,hder))[0] -2*(M+MD)/np.sqrt(40.0**2+40.0**2)
-"""
-# Legacy: yet another earlier lamb_Mat, single-branch (z >= 0 case only), commented out.
-# @jit
-# def lamb_Mat(rho,z,M,MD,b,m,hder):
-#     return sci.quad(dlamb,40.0,z,(rho,M,MD,b,1,m,hder))[0] + sci.quad(dlamb2,40.0,rho,(40.0,M,MD,b,0,m,hder))[0] + lambSch(40.0,40.0,M+MD,MD,b)
 
 
 
@@ -139,7 +114,6 @@ for i in range(len(z)):
             print(z[i], rho[j])
 
 print(count)
-# np.savetxt('Mat_nu_disk_big',nu_Mat)
 np.savetxt('Mat_constA_Mbh_0.9', nu_Mat)
 
 
