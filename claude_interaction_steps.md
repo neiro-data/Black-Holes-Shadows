@@ -145,7 +145,87 @@ signatures + bodies against the basis.
 - The `geo` "difference" flagged for `test_Z_SHADOW.py` and `generate_matriz.py` was
   only a trailing dead string literal in the basis's `geo`; the live bodies match.
 
+## Interaction 4
+
+Extracted the `#Duplicated` physics core (identified across Interactions 1-3) into
+a new shared module, `weyl_core.py`, and updated the four consuming scripts to
+import from it instead of carrying their own copies.
+
+### What moved
+
+31 functions (30 physics helpers + a new `load_matrix` loader) moved into
+`weyl_core.py`: numerical utilities (`simps`, `derivative`, `run_kut4_mod`),
+geometry/potentials (`d1`, `d2`, `xi2`, `nuD`, `nu`, `lambSch`), metric
+components and photon momenta (`gtt`/`grr`/`gzz`/`gpp`, `zeta`,
+`dthe`/`dr`/`Pphi`/`Pt`/`dphi`/`dt`, `derNU`, `dlamb`, `dlamb2`, `lamb`), and the
+non-jitted observer-frame variants (`d1_i`, `d2_i`, `xi2_i`, `nuD_i`, `nu_i`,
+`gpp_i`). Each script keeps its own `geo`, `func`, driver, and (where applicable)
+`f_paral`/`lamb_Mat` — these are the genuine variant layer (shadow vs. lensing
+output, disk-crossing branch, serial vs. parallel, the quadrature-based table
+builder) and were deliberately not merged, matching the Interaction 3 findings.
+
+### Two intentional changes made during extraction
+
+1. **`xi2` canonicalized to the `np.abs`-guarded form** (previously only in
+   `generate_matriz.py`; the three tracers lacked the guard). User-confirmed
+   choice: matches how the lookup table was actually built and avoids NaN for a
+   radicand that goes slightly negative near the disk edge.
+2. **Decorators unified to plain `@jit(nopython=True)`** for scalar leaf helpers
+   (was `parallel=True` in `test_parallel_SHADOW.py`, a no-op there). **Exception:
+   `run_kut4_mod` keeps `@jit(nopython=True, parallel=True)`** — it is a
+   higher-order function that receives another jitted function (`geo`) as a
+   callback, and `test_parallel_SHADOW.py`'s `geo`/`func` still carry
+   `parallel=True` (kept as-is, per the variant-layer rule); pairing a
+   plain-nopython `run_kut4_mod` with that parallel `geo` callback triggered
+   numba's workqueue threading layer to abort ("Concurrent access has been
+   detected") — confirmed via direct testing, not a hunch. Restoring
+   `run_kut4_mod`'s original `parallel=True` (its historical pairing) fixed it,
+   and is a no-op for the two callers whose own `geo`/`func` are plain nopython.
+
+### Verification
+
+- **Static:** wrote an AST-diff tool comparing every function now in
+  `weyl_core.py` against its pre-refactor body captured from `git show HEAD:...`.
+  29/31 byte-identical; the 2 differences are the intended `xi2` change and one
+  incidental dead-code removal in `run_kut4_mod` (a stray triple-quoted legacy
+  string statement with zero runtime effect, dropped during the move).
+- **Dynamic smoke test:** imported `weyl_core.py` standalone and called every
+  jitted function (with a synthesized dummy `Mat_nu` for `lamb` and its
+  dependents) to force numba compilation — all succeeded.
+- **Driver-core integration test:** since these scripts execute their driver at
+  import time, wrote a harness that AST-extracts just `geo`/`func` (+imports)
+  from each refactored file, execs them in a fresh namespace, and drives one
+  full `func()` call (exercising the whole `run_kut4_mod` -> `geo` -> weyl_core
+  call graph) — passed for all three tracers.
+- **Pre-existing issues found and ruled out of scope** (confirmed identical on
+  the pre-refactor originals via `git stash`/`git show HEAD:...`, so not
+  refactor regressions):
+  - The real end-to-end driver run (`fsolve` -> `gpp_i` -> `math.log` on a
+    0-d array) fails under this repo's currently pinned numpy/scipy versions,
+    in both old and new code.
+  - `generate_matriz.py`'s `lamb_Mat` (bare `@jit`, calls `scipy.quad`) fails to
+    compile under the currently pinned numba version, in both old and new code
+    — numba dropped automatic object-mode fallback for un-parameterized `@jit`.
+  - `test_parallel_SHADOW.py`'s `f_paral` (the actual `prange` parallel path)
+    hits numba's "nested parallel region" limitation when it calls
+    `func` -> `run_kut4_mod`(parallel) -> `geo`(parallel) from inside its own
+    `prange` loop — reproduced identically on the pre-refactor original, so
+    this file's "true parallelism" was already non-functional under the
+    current numba/environment combination before this refactor.
+
+### Wrap-up
+
+- Updated `README.md`'s Pipeline and "Notes on provenance" sections to describe
+  `weyl_core.py` and point to this entry.
+
 ## Suggested next steps (not yet done)
 
-- Refactor the `#Duplicated` helpers into a shared module instead of copies per file.
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.
+- Consider threading `Mat_nu` as an explicit `lamb` parameter instead of a
+  module global set via `load_matrix` (deferred/provisional design choice from
+  this interaction).
+- The three pre-existing environment/numba issues found above (fsolve/math.log,
+  bare-`@jit`+`scipy.quad`, nested-`parallel=True`) are unrelated to this
+  refactor but block actually running any of these scripts end-to-end under the
+  currently pinned dependency versions; worth a dedicated pass if these scripts
+  need to run again.

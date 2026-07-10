@@ -29,12 +29,15 @@ This family shares a precomputed lambda-potential lookup table, since
 lambda(rho, z) only has a closed form on the symmetry axis and must
 otherwise be found by numerically integrating its derivatives from a
 reference point at "infinity" (rho=z=40) — too slow to redo on every
-photon step.
+photon step. It also shares a common physics core (metric potentials,
+metric components, RKF45 integrator) consolidated into **`weyl_core.py`**
+— see "Notes on provenance" below.
 
-1. **`generate_matriz.py`** — tabulates lambda on a (z, rho) grid and
-   saves it to disk (e.g. `Mat_constA_Mbh_0.9`), consumed by the ray
-   tracers below via `np.loadtxt("Mat_nu_disk*")` and bilinear
-   interpolation.
+1. **`generate_matriz.py`** — the pipeline's *base* script (must run
+   first): tabulates lambda on a (z, rho) grid via `lamb_Mat` (its one
+   function not shared via `weyl_core.py`) and saves it to disk (e.g.
+   `Mat_constA_Mbh_0.9`), consumed by the ray tracers below via
+   `weyl_core.load_matrix("Mat_nu_disk*")` and bilinear interpolation.
 2. One of the ray tracers integrates null geodesics over a grid of
    emission angles and produces `Mat`/`Mz` (and `Mphi`) matrices via
    `np.savetxt`:
@@ -69,12 +72,24 @@ These scripts are exported from Jupyter notebooks (`# In[NN]:` cell
 markers throughout) rather than written as standalone modules, so large
 blocks of commented-out legacy code (earlier classification attempts,
 dead lensing/diagnostic code, alternate physics formulations) are
-preserved for reference. Because the original notebooks were cloned
-rather than refactored into a shared module, several helper functions
-(e.g. `simps`, `derivative`, `d1`, `d2`, `xi2`, `nuD`, `nu`, `lambSch`,
-`gpp`/`gtt`/`grr`/`gzz`, the `_i` observer-frame variants, `derNU`,
-`dlamb`, `dlamb2`) are duplicated near-verbatim across files and tagged
-`#Duplicated` in the source.
+preserved for reference.
+
+The four Weyl-family scripts (`generate_matriz.py`, `test_Z_SHADOW.py`,
+`test_parallel_SHADOW.py`, `test_symmetry_lensing.py`) originally
+duplicated a large physics-helper core near-verbatim (`simps`,
+`derivative`, `d1`, `d2`, `xi2`, `nuD`, `nu`, `lambSch`,
+`gpp`/`gtt`/`grr`/`gzz`, `zeta`, `dthe`/`dr`/`Pphi`/`Pt`/`dphi`/`dt`, the
+`_i` observer-frame variants, `derNU`, `dlamb`, `dlamb2`, `lamb`,
+`run_kut4_mod`) across files, historically tagged `#Duplicated` in the
+source. That core now lives in **`weyl_core.py`**, imported by each
+script via `from weyl_core import *`; see its module docstring for the
+one intentional behavioural change made during extraction (`xi2`'s
+`np.abs` guard) and the decorator-unification notes. Each script keeps
+its own `geo` (geodesic RHS) and `func` (single-ray tracer) locally —
+these differ meaningfully between scripts (shadow vs. lensing output,
+disk-crossing classification, serial vs. parallel) and were deliberately
+not merged; see `claude_interaction_steps.md` (Interactions 3 and 4) for
+the reasoning.
 
 ## HPC
 
