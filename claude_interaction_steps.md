@@ -60,6 +60,44 @@ The repo went from a loose bag of notebook exports to a reproducible, documented
 pipeline end to end, and generated data is kept out of version control (with the
 manual-review caveat noted above).
 
+## Interaction 2
+
+Compared the two serial ray tracers and removed the redundant one.
+
+### Steps taken
+
+1. **Diffed `test_Z_SHADOW.py` against `test2_Z_SHADOW.py`.** They define the
+   exact same set of functions; `test2` is a *de-generalized* copy of `test`:
+   - `test_Z_SHADOW.py` keeps the family-standard `nu(…, m)` component selector
+     (m=0 BH-only / m=1 disk-only / m=2 sum), and that generality propagates
+     through `derNU`, `dlamb`, `dlamb2`, `lamb`, `gtt/grr/gzz/gpp` and `geo`.
+   - `test2_Z_SHADOW.py` strips the `m` selector, hard-wiring the BH+disk
+     (m=2) case, and inlines `nuD` inside `nu`.
+   - Remaining differences are run-configuration only, not logic: `M/MD`
+     (`1.0/0.0` vs `0.1/0.9`), matrix file (`Mat_nu_disk0.0` vs `…0.9`),
+     integrator `tol` (`1e-4` vs `1e-3`), and active vs commented `np.savetxt`
+     / per-pixel timing.
+
+2. **Confirmed nothing needed to be copied from `test2` into `test`.** Every
+   definition in `test2` already exists in `test` in a more general form, so
+   `test` is effectively a superset — `test2` carried no unique logic.
+
+3. **Deleted `test2_Z_SHADOW.py`** as a redundant specialization. Its disk run
+   is reproducible from `test_Z_SHADOW.py` by setting `M=0.1, MD=0.9`, pointing
+   at `Mat_nu_disk0.9`, and un-commenting the save lines.
+
+4. **Updated `README.md`** to drop the deleted script from the pipeline list.
+
+### Notes
+
+- Provenance `#Duplicated: … test2_Z_SHADOW.py` references still linger in the
+  docstrings/comments of the sibling scripts (`generate_matriz.py`,
+  `test_parallel_SHADOW.py`, `test_symmetry_lensing.py`, etc.). These are
+  historical notes and were left untouched.
+- A latent bug shared by the whole family remains: in `func`, `yf` is only
+  assigned inside the `while` loop, so a ray failing the loop condition on the
+  first check would hit `return (yf)` unbound. Not addressed here.
+
 ## Suggested next steps (not yet done)
 
 - Refactor the `#Duplicated` helpers into a shared module instead of copies per file.

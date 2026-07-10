@@ -42,8 +42,6 @@ photon step.
      pixel as BH-captured / beyond-disk / neither; its `np.savetxt` calls
      are commented out (exploratory run, shows an inline plot instead of
      saving).
-   - **`test2_Z_SHADOW.py`** — serial variant with a simplified `nu`
-     (no BH/disk component selector); does save `Mat`/`Mz`.
    - **`test_parallel_SHADOW.py`** — the canonical/production version,
      parallelized with numba (`@jit(parallel=True)` + `prange`) for true
      multi-core execution; saves `Mat`/`Mz`.
