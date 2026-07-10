@@ -35,30 +35,16 @@ This file depends on a pre-tabulated lambda-potential matrix loaded via
 and saves its output matrices (`Mat`, `Mz`, `Mphi`) via np.savetxt for the
 plotting scripts (symmetry.py, simetria_shadow*.py, lensing_image.py) to
 consume.
-
-This is a straight indentation/documentation pass over the original
-Jupyter-notebook export (note the `# In[NN]` cell markers, kept for
-provenance); no behaviour was changed beyond the extraction itself.
 """
-
-# In[25]:
-
 
 import math
 import numpy as np
-#import matplotlib.pyplot as plt
-#import matplotlib.colors
 import time
 from numba import jit
-import cmath
-import scipy.integrate as sci
 from scipy.optimize import fsolve
 
 import weyl_core
 from weyl_core import *
-
-
-# In[33]:
 
 
 # Geodesic & ray tracing
@@ -120,14 +106,11 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
         sentinel [0.001, 0.001, 0.2] if the photon is captured (nu <= -3.0).
     """
 
-    it = 0
     Y=[]
     Y.append(y)
     while (nu(y[0],y[2],M,MD,b,2) > -3.0 and np.sqrt(gpp(np.sqrt(y[0]**2+y[2]**2),0,M,MD,b)) < 30.0):
         (h,x,y) = run_kut4_mod(geo, x, y, h,M,alfa,beta,rho0,z0,MD,b,hder)
         Y.append(y)
-        it += 1
-
 
         if np.sqrt(gpp(np.sqrt(y[0]**2+y[2]**2),0,M,MD,b)) >= 30.0:
             yf = [Y[-1][0],Y[-1][2],Y[-1][4]]
@@ -149,9 +132,8 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
 # Driver: solve for the initial observer's rho, build the emission-angle
 # grid but only over a quarter of the full (alfa, beta) range (symmetry
 # exploitation: the full lensing image can be reconstructed from one
-# quadrant by reflection, done in the dead mirroring block further below),
-# ray-trace that quadrant with `func`, and save the resulting Mat/Mz/Mphi
-# matrices.
+# quadrant by reflection), ray-trace that quadrant with `func`, and save
+# the resulting Mat/Mz/Mphi matrices.
 weyl_core.load_matrix("Mat_nu_disk0.1")
 
 start = time.time()
@@ -167,10 +149,6 @@ R_solution = fsolve(func_initial, R_initial_guess)
 
 rho0 = float(R_solution)
 print(rho0)
-
-
-
-hder = 10**-6
 
 alfaa = np.linspace(-np.arctan(10/15),np.arctan(10/15),1000)
 betaa = np.linspace(np.arctan(10/15),-np.arctan(10/15),1000)
@@ -199,229 +177,3 @@ print(end-start)
 np.savetxt('Mat',Mat)
 np.savetxt('Mz',Mz)
 np.savetxt('Mphi',Mphi)
-
-
-
-#############################################################
-#############################################################
-
-########            UNCOMMENT           ####################
-
-#############################################################
-#############################################################
-#############################################################
-
-# Legacy plotting: mirroring/reconstruction block (dead, never executed).
-# This is the symmetry step referenced above -- it rebuilds full four-
-# quadrant Mat2/Mz2/Mphi3 matrices from the traced quadrant via reflected
-# indexing ([i,j], [i,-j-1], [-i-1,j], [-i-1,-j-1]), with a sign flip for z
-# and a 2*pi-phi wrap for the angular coordinate, then classifies pixels
-# into four lensing-image quadrants (M2) and plots them.
-"""
-Mat2 = np.zeros((2*len(Mat),2*len(Mat[0])))
-Mz2 = np.zeros((2*len(Mz),2*len(Mz[0])))
-Mphi2 = np.zeros((len(Mphi),len(Mphi[0])))
-Mphi3 = np.zeros((2*len(Mphi2),2*len(Mphi2[0])))
-M2 = np.zeros((len(Mat2),len(Mat2[0])))
-
-
-for i in range(len(Mphi)):
-    for j in range(len(Mphi[0])):
-            if Mphi[i,j] > 2*np.pi:
-                    Mphi2[i,j] = Mphi[i,j]-int(Mphi[i,j]/(2*np.pi))*2*np.pi
-
-            elif (Mphi[i,j] < 0 and Mphi[i,j] > -2*np.pi):
-                    Mphi2[i,j] = Mphi[i,j] + 2*np.pi
-
-            elif Mphi[i,j] < -2*np.pi:
-                    Mphi2[i,j] = Mphi[i,j] - int(Mphi[i,j]/(2*np.pi))*2*np.pi + 2*np.pi
-
-            else:
-                    Mphi2[i,j] = Mphi[i,j]
-
-
-########    RADIAL COORDINATE   ############
-
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-        Mat2[i,j] = Mat[i,j]
-        Mat2[i,-j-1] = Mat[i,j]
-        Mat2[-i-1,j] = Mat[i,j]
-        Mat2[-i-1,-j-1] = Mat[i,j]
-
-
-########    PHI COORDINATE   ############
-
-for i in range(len(Mphi2)):
-    for j in range(len(Mphi2[0])):
-        Mphi3[i,j]       = Mphi2[i,j]
-        Mphi3[i,-j-1]    = 2*np.pi - Mphi2[i,j]
-        Mphi3[-i-1,j]    = Mphi2[i,j]
-        Mphi3[-i-1,-j-1] = 2*np.pi - Mphi2[i,j]
-
-########    Z COORDINATE   ############
-
-for i in range(len(Mz)):
-    for j in range(len(Mz[0])):
-        Mz2[i,j] = Mz[i,j]
-        Mz2[i,-j-1] = Mz[i,j]
-        Mz2[-i-1,j] = - Mz[i,j]
-        Mz2[-i-1,-j-1] = -Mz[i,j]
-
-
-for i in range(len(Mat2)):
-    for j in range(len(Mat2[0])):
-            if Mat2[i,j] < 0.002:
-                    M2[i,j] = 0
-            else:
-                    if (Mz2[i,j] < 0 and (Mphi3[i,j] >= 0 and Mphi3[i,j] <= np.pi)):
-                        M2[i,j] = 3 #1
-
-                    elif ( Mz2[i,j] < 0 and (Mphi3[i,j] > np.pi and Mphi3[i,j] <= 2*np.pi)):
-                        M2[i,j] = 4 #2
-
-                    elif (Mz2[i,j] >= 0 and (Mphi3[i,j] > 0  and Mphi3[i,j] <= np.pi)):
-                        M2[i,j] = 2 #3
-
-                    elif ( Mz2[i,j] >= 0 and (Mphi3[i,j] > np.pi and Mphi3[i,j] <= 2*np.pi )):
-                        M2[i,j] = 1 #4
-
-
-
-
-plt.figure(figsize = (25,25))
-
-#c_map = [[0,0,0],[0, 1, 0], [1, 0, 0], [0, 0, 1], [1, 1, 0]]#,[1,1,1]]#,[0,1,1]]
-c_map = [[0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0]]
-
-cm = matplotlib.colors.ListedColormap(c_map)
-
-#plt.imshow(M2, cmap = cm,extent=[-np.sqrt(gpp(r0,a,M,theta))*beta[0],-np.sqrt(gpp(r0,a,M,theta))*beta[-1],np.sqrt(gpp(r0,a,M,theta))*alfa[0],np.sqrt(gpp(r0,a,M,theta))*alfa[-1]])
-#plt.imshow(M22, cmap = "binary",extent=[beta[0],beta[-1],alfa[0],alfa[-1]])
-
-plt.imshow(M2, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],alfa[-1]])
-
-
-
-plt.xlabel("x(M)",size=40)
-plt.ylabel("y(M)",size=40)
-
-plt.tick_params(axis='both', which='major', labelsize=30)
-
-#plt.show()
-plt.savefig("Schwarzschild_WeylCoords_lensing_154x154")
-
-#############################################################
-#############################################################
-#############################################################
-#############################################################
-#############################################################
-
-
-"""
-
-# Legacy plotting: second (R, theta)-based lensing classification + grid-
-# line overlay + figure attempt, also dead/never executed.
-#####################		( R , THETA ) 		###################################
-"""
-Mphi2 = np.zeros((len(alfa),len(beta)))
-Mthet2 = np.zeros((len(alfa),len(beta)))
-Mat2 = np.zeros((len(alfa),len(beta)))
-
-for i in range(len(alfa)):
-    for j in range(len(beta)):
-            Mat2[i,j] = 1+0.5*(d1(Mat[i,j],Mz[i,j],1)+d2(Mat[i,j],Mz[i,j],1))
-
-for i in range(len(alfa)):
-    for j in range(len(beta)):
-        #Mthet2[i,j] = np.arccos(Mz[i,j]/(np.sqrt(Mat[i,j]**2+Mz[i,j]**2)-1))
-            Mthet2[i,j] = np.arccos(0.5*(np.sqrt(Mat[i,j]**2+(Mz[i,j]+1)**2)-np.sqrt(Mat[i,j]**2+(Mz[i,j]-1)**2)))
-
-for i in range(len(alfa)):
-    for j in range(len(beta)):
-            if Mphi[i,j] > 2*np.pi:
-                    Mphi2[i,j] = Mphi[i,j]-int(Mphi[i,j]/(2*np.pi))*2*np.pi
-
-            elif (Mphi[i,j] < 0 and Mphi[i,j] > -2*np.pi):
-                    Mphi2[i,j] = Mphi[i,j] + 2*np.pi
-
-            elif Mphi[i,j] < -2*np.pi:
-                    Mphi2[i,j] = Mphi[i,j] - int(Mphi[i,j]/(2*np.pi))*2*np.pi + 2*np.pi
-
-            else:
-                    Mphi2[i,j] = Mphi[i,j]
-
-
-dang = 0.01
-kmax_the = np.pi/ (10*np.pi/180)
-kmax_phi = 2*np.pi/ (10*np.pi/180)
-
-M2 = np.zeros((len(Mat),len(Mat[0])))
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-        #if (Mat[i,j] < 0.08 and np.abs(Mz[i,j]) < 1.01) :
-            if Mat2[i,j] < 2.2:
-                    M2[i,j] = 0
-            else:
-                    if ((Mthet2[i,j] >= np.pi/2 and Mthet2[i,j] <= np.pi) and (Mphi2[i,j] >= 0 and Mphi2[i,j] <= np.pi)):
-                        M2[i,j] = 3 #1
-
-                    elif ((Mthet2[i,j] >= np.pi/2  and Mthet2[i,j] <= np.pi) and (Mphi2[i,j] > np.pi and Mphi2[i,j] <= 2*np.pi)):
-                        M2[i,j] = 4 #2
-
-                    elif ((Mthet2[i,j] >= 0 and Mthet2[i,j] < np.pi/2) and (Mphi2[i,j] > 0  and Mphi2[i,j] <= np.pi)):
-                        M2[i,j] = 2 #3
-
-                    elif ((Mthet2[i,j] >= 0 and Mthet2[i,j] <= np.pi/2) and (Mphi2[i,j] > np.pi and Mphi2[i,j] <= 2*np.pi )):
-                        M2[i,j] = 1 #4
-
-
-
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-            "Einstein ring"
-        #if (( ((Mthet2[i,j] < np.pi/2 + 10*np.pi/180 and Mthet2[i,j]> np.pi/2-10*np.pi/180) and \
-        #     (Mphi2[i,j]< np.pi + 10*np.pi/180 and Mphi2[i,j]> np.pi -10*np.pi/180)) and \
-        #   ((Mphi2[i,j]-np.pi)**2 + (Mthet2[i,j]-np.pi/2)**2 <= np.pi * (np.pi*10/180)**2) ) and \
-        #   Mat[i,j] >=0.02):
-        #        M2[i,j] = 5
-
-            "Black lines of the grid"
-            kmax = kmax_the
-            for k in range(0,int(kmax)+1):
-                    if (Mthet2[i,j] <= k*10*np.pi/180 + dang and Mthet2[i,j] >= k*10*np.pi/180-dang):
-                        M2[i,j] = 0
-
-            kmax = kmax_phi
-            for k in range(0,int(kmax)+1):
-                    if (Mphi2[i,j] <= k*10*np.pi/180 + dang and Mphi2[i,j] >= k*10*np.pi/180-dang):
-                        M2[i,j] = 0
-
-
-
-
-plt.figure(figsize = (25,25))
-
-#c_map = [[0,0,0],[0, 1, 0], [1, 0, 0], [0, 0, 1], [1, 1, 0]]#,[1,1,1]]#,[0,1,1]]
-c_map = [[0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0]]
-
-cm = matplotlib.colors.ListedColormap(c_map)
-
-#plt.imshow(M2, cmap = cm,extent=[-np.sqrt(gpp(r0,a,M,theta))*beta[0],-np.sqrt(gpp(r0,a,M,theta))*beta[-1],np.sqrt(gpp(r0,a,M,theta))*alfa[0],np.sqrt(gpp(r0,a,M,theta))*alfa[-1]])
-#plt.imshow(M22, cmap = "binary",extent=[beta[0],beta[-1],alfa[0],alfa[-1]])
-
-plt.imshow(M2, cmap = cm,extent=[-beta[0],-beta[-1],alfa[0],alfa[-1]])
-
-#plt.plot(x(r,a,M,theta,r0),yplus(r,a,M,theta,r0),'o',color="red", label="analytical")
-#plt.plot(x(r,a,M,theta,r0),yminus(r,a,M,theta,r0),'o',color="red",label = "analytical")
-
-plt.xlabel("x(M)",size=40)
-plt.ylabel("y(M)",size=40)
-
-plt.tick_params(axis='both', which='major', labelsize=30)
-#plt.legend(loc=10, bbox_to_anchor=(0.85, 0.9), ncol=1,fontsize=17)
-#plt.xlim(-np.arctan(10/15),np.arctan(10/15))
-#plt.ylim(-np.arctan(10/15),np.arctan(10/15))
-#plt.show()
-plt.savefig("Schwarzschild_WeylCoords_lensing_154x154")
-"""

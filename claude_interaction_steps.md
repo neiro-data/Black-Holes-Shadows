@@ -218,6 +218,55 @@ builder) and were deliberately not merged, matching the Interaction 3 findings.
 - Updated `README.md`'s Pipeline and "Notes on provenance" sections to describe
   `weyl_core.py` and point to this entry.
 
+## Interaction 5
+
+Removed the dead notebook-export cruft from the three Weyl-family ray tracers
+(`test_parallel_SHADOW.py`, `test_symmetry_lensing.py`, `test_Z_SHADOW.py`),
+reversing the earlier "preserve for reference" decision from Interaction 1 now
+that the live behaviour of each file has been mapped out (Interactions 3-4).
+
+### What was removed
+
+- Large triple-quoted legacy blocks: earlier pixel-classification attempts,
+  dead lensing/diagnostic plotting code, and — in `test_symmetry_lensing.py` —
+  the never-executed mirroring/reconstruction block.
+- `# In[NN]:` Jupyter cell markers.
+- Unused imports left over from the dead blocks: `cmath` and
+  `scipy.integrate` in all three files; `matplotlib.pyplot`/`matplotlib.colors`
+  in `test_parallel_SHADOW.py` and `test_symmetry_lensing.py` (matplotlib was
+  never live in either — only referenced inside the deleted blocks).
+  `test_Z_SHADOW.py` keeps its matplotlib imports since its inline
+  `plt.show()` figure is live code.
+- Dead variables that fed only the deleted blocks: the orphaned `M2`/`Mat2`/
+  `Mz2` allocations sitting before the removed blocks in
+  `test_parallel_SHADOW.py`; the unused `it` loop counter and a duplicate
+  `hder = 10**-6` assignment in `test_symmetry_lensing.py`; the never-populated
+  `Mphi` allocation in `test_Z_SHADOW.py` (its `func` only ever returns
+  rho/z, never phi).
+
+### What was kept
+
+All live behaviour is untouched: `prange` parallelism and the `f_paral`
+driver in `test_parallel_SHADOW.py`; the 5-component state carrying `phi` and
+the `Mphi` output in `test_symmetry_lensing.py`; the `+50.0` disk-crossing
+branch and the inline matplotlib figure in `test_Z_SHADOW.py`. The `#NOTE:`
+docstring caveat about `func`'s possibly-unbound `yf` was left as-is — it
+documents live behaviour, not dead code.
+
+### Docs updated
+
+Rewrote each file's module docstring to drop the "commented blocks/cell
+markers preserved for provenance" language, and updated `README.md`'s "Notes
+on provenance" section to say the cruft has been removed rather than kept in
+place (history remains recoverable via git).
+
+### Verification
+
+`python -m py_compile` on all three files, plus a manual grep pass confirming
+no references remain to the removed imports (`cmath`, `scipy.integrate as sci`,
+`matplotlib`/`plt.` in the two files where it's no longer imported) or to
+`Mphi` in `test_Z_SHADOW.py`.
+
 ## Suggested next steps (not yet done)
 
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.

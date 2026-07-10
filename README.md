@@ -5,8 +5,8 @@ black-hole shadow and gravitational-lensing images, in two independent
 spacetimes: a Weyl-coordinate Schwarzschild black hole embedded in a
 Morgan-Morgan accretion disk, and a Kerr (rotating) black hole in
 Boyer-Lindquist-like coordinates. Each script began life as a Jupyter
-notebook and was exported to a standalone `.py` file, so cell markers and
-legacy exploratory code remain in place (see "Notes on provenance" below).
+notebook and was exported to a standalone `.py` file (see "Notes on
+provenance" below).
 
 ## Setup
 
@@ -68,11 +68,13 @@ matrices, and saves them with `np.savetxt` for downstream plotting.
 
 ## Notes on provenance
 
-These scripts are exported from Jupyter notebooks (`# In[NN]:` cell
-markers throughout) rather than written as standalone modules, so large
-blocks of commented-out legacy code (earlier classification attempts,
-dead lensing/diagnostic code, alternate physics formulations) are
-preserved for reference.
+These scripts were originally exported from Jupyter notebooks rather than
+written as standalone modules. The notebook cell markers (`# In[NN]:`) and
+large blocks of commented-out legacy code (earlier classification
+attempts, dead lensing/diagnostic code, alternate physics formulations)
+that came out of that export have since been removed to leave only the
+live, executable behaviour of each script; the removed history remains
+recoverable via git if it's ever needed for reference.
 
 The four Weyl-family scripts (`generate_matriz.py`, `test_Z_SHADOW.py`,
 `test_parallel_SHADOW.py`, `test_symmetry_lensing.py`) originally
