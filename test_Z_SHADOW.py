@@ -8,7 +8,7 @@ numba `prange`) double loop over emission angles, and classifies each pixel
 by its final rho/z, tagging pixels beyond the disk plane with a +50.0 offset
 on z (see `func`'s "Pontos do Disco" branch) so the disk can be told apart
 from the black hole in post-processing. Depends on a pre-tabulated
-lambda-potential matrix loaded via `weyl_core.load_matrix("Mat_nu_disk0.0")`
+lambda-potential matrix loaded via `general_methods.load_matrix("Mat_nu_disk0.0")`
 (produced by generate_matriz.py). Unlike its siblings, this file's np.savetxt
 calls for Mat/Mz are commented out (see the driver section) -- it appears to
 have been used as an interactive/exploratory run rather than a batch
@@ -16,8 +16,8 @@ data-producing one, with an inline matplotlib figure shown instead.
 
 The shared physics core (simps, derivative, d1, d2, xi2, nuD, nu, lambSch,
 gpp/gtt/grr/gzz, zeta, dthe, dr, Pphi, Pt, dphi, dt, the `_i` observer-frame
-variants, derNU, dlamb, dlamb2, lamb, run_kut4_mod) now lives in weyl_core.py
-and is imported below -- see weyl_core.py's module docstring for the
+variants, derNU, dlamb, dlamb2, lamb, run_kut4_mod) now lives in general_methods
+and is imported below -- see general_methods's module docstring for the
 canonicalization notes (xi2's np.abs guard, unified decorators). `geo` and
 `func` remain local to this file: `func` here keeps a *live* disk-crossing
 classification branch (the `+50.0` z tag) that the basis test_parallel_SHADOW.py
@@ -34,8 +34,8 @@ import time
 from numba import jit
 from scipy.optimize import fsolve
 
-import weyl_core
-from weyl_core import *
+import general_methods
+from general_methods import *
 
 
 @jit(nopython=True)
@@ -127,7 +127,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 # (rather than save) the resulting shadow figure -- an interactive/
 # exploratory run, unlike the parallel production driver in
 # test_parallel_SHADOW.py.
-weyl_core.load_matrix("Mat_nu_disk0.0")
+general_methods.load_matrix("Mat_nu_disk0.0")
 
 start = time.time()
 M = 1.0

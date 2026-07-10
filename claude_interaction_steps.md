@@ -267,6 +267,69 @@ no references remain to the removed imports (`cmath`, `scipy.integrate as sci`,
 `matplotlib`/`plt.` in the two files where it's no longer imported) or to
 `Mphi` in `test_Z_SHADOW.py`.
 
+## Interaction 6
+
+Split the flat `weyl_core.py` (from Interaction 4) into a `general_methods/`
+package, one file per concern, and added convenience classes around the
+metric functions.
+
+### What moved
+
+`weyl_core.py` became `general_methods/`:
+- `mathematical_formulas.py` — `simps`, `derivative`, `run_kut4_mod`,
+  `load_matrix`, `lamb` (+ the `Mat_nu` module global).
+- `physical_quantities.py` — `d1`, `d2`, `xi2` and their non-jitted `_i`
+  observer-frame copies.
+- `physical_potentials.py` — `nu`, `nuD`, `lambSch`, `derNU`, `dlamb`,
+  `dlamb2` and their `_i` copies.
+- `spacetime_metrics.py` — `gtt`, `grr`, `gzz`, `gpp`, `gpp_i`, `zeta`,
+  `Pphi`, `Pt`, `dthe`, `dr`, `dphi`, `dt`, still as module-level free
+  functions, plus two new classes: `Metric` (gtt/grr/gzz/gpp/zeta/Pphi/Pt)
+  and `MetricDerivatives` (dthe/dr/dphi/dt), each bound to fixed `(M, MD, b)`
+  and exposing `(rho, z, ...)`-only methods.
+- `__init__.py` re-exports every submodule's public names and carries
+  forward the original module docstring's canonicalization notes (`xi2`
+  guard, `run_kut4_mod`'s `parallel=True` requirement).
+
+No functions were deleted. The `_i` observer-frame chain was the only
+candidate for "erase non-jit duplicates of jitted functions" and was
+deliberately kept — user-confirmed, since `gpp_i` (its only externally-called
+member) exists specifically so `scipy.optimize.fsolve` has a non-jitted
+target, not as dead duplication.
+
+### Why `gtt`/`grr`/`gzz`/`gpp`/`lamb`/`nu`/`derNU` stayed as free functions
+
+Investigated call sites in the four consumers before wrapping anything in a
+class: `gpp`, `lamb`, `nu`, and `derNU` are called by bare name *inside* the
+`@jit(nopython=True)` `geo`/`func` bodies of `test_parallel_SHADOW.py`,
+`test_Z_SHADOW.py`, and `test_symmetry_lensing.py`. Numba nopython mode
+can't call Python instance methods, so those four had to remain module-level
+jitted functions — only `gtt`/`grr`/`gzz` (never called this way) were free
+to be wrapped without risk. `Metric`/`MetricDerivatives` are therefore thin,
+non-jitted wrappers that delegate to the free functions, satisfying the
+"class for metrics" ask without touching jit compatibility.
+
+### Consumer script updates
+
+`generate_matriz.py`, `test_parallel_SHADOW.py`, `test_Z_SHADOW.py`,
+`test_symmetry_lensing.py`: `import weyl_core` / `from weyl_core import *` /
+`weyl_core.load_matrix(...)` renamed to `general_methods` throughout
+(including docstring references). `weyl_core.py` deleted.
+
+### Verification
+
+- Imported `general_methods` standalone and called every jitted function
+  plus both new classes (`Metric`, `MetricDerivatives`) with a synthesized
+  dummy `Mat_nu` — all executed correctly.
+- Re-ran the same `fsolve`/`lamb_Mat` code path `generate_matriz.py` uses
+  (with a couple of sample points instead of the full 1200x1200 grid) and
+  hit the same two pre-existing environment issues already documented in
+  Interaction 4 (`fsolve`→`math.log` on a non-scalar array; bare `@jit` +
+  `scipy.quad` no longer object-mode-falls-back under the pinned numba) —
+  confirmed identical on the pre-refactor `weyl_core.py` via `git stash`, so
+  not regressions from this split.
+- `ast.parse` syntax check on all four updated consumer scripts.
+
 ## Suggested next steps (not yet done)
 
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.

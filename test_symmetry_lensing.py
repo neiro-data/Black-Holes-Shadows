@@ -23,15 +23,15 @@ classification and matplotlib plotting code. None of that block executes.
 
 The shared physics core (simps, derivative, d1, d2, xi2, nuD, nu, lambSch,
 gpp/gtt/grr/gzz, zeta, dthe, dr, Pphi, Pt, dphi, dt, the `_i` observer-frame
-variants, derNU, dlamb, dlamb2, lamb, run_kut4_mod) now lives in weyl_core.py
-and is imported below -- see weyl_core.py's module docstring for the
+variants, derNU, dlamb, dlamb2, lamb, run_kut4_mod) now lives in general_methods
+and is imported below -- see general_methods's module docstring for the
 canonicalization notes (xi2's np.abs guard, unified decorators). `geo` and
 `func` remain local to this file: they carry the extra phi state component
 that makes this a lensing-map builder rather than a binary shadow tracer --
 this file's genuine variant behaviour, not shared with the other tracers.
 
 This file depends on a pre-tabulated lambda-potential matrix loaded via
-`weyl_core.load_matrix("Mat_nu_disk0.1")` (produced by generate_matriz.py),
+`general_methods.load_matrix("Mat_nu_disk0.1")` (produced by generate_matriz.py),
 and saves its output matrices (`Mat`, `Mz`, `Mphi`) via np.savetxt for the
 plotting scripts (symmetry.py, simetria_shadow*.py, lensing_image.py) to
 consume.
@@ -43,8 +43,8 @@ import time
 from numba import jit
 from scipy.optimize import fsolve
 
-import weyl_core
-from weyl_core import *
+import general_methods
+from general_methods import *
 
 
 # Geodesic & ray tracing
@@ -134,7 +134,7 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
 # exploitation: the full lensing image can be reconstructed from one
 # quadrant by reflection), ray-trace that quadrant with `func`, and save
 # the resulting Mat/Mz/Mphi matrices.
-weyl_core.load_matrix("Mat_nu_disk0.1")
+general_methods.load_matrix("Mat_nu_disk0.1")
 
 start = time.time()
 M = 0.9

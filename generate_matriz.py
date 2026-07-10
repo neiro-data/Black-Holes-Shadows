@@ -12,17 +12,17 @@ otherwise be obtained by numerically integrating its (rho, z) derivatives
 Doing that integral on every ray-tracing step would be prohibitively slow, so
 this script tabulates lambda on a (z, rho) grid once, via `lamb_Mat`, and
 saves it to disk. The ray tracers then bilinearly interpolate this saved
-matrix at runtime (see `weyl_core.lamb()`) instead of re-integrating.
+matrix at runtime (see `general_methods.lamb()`) instead of re-integrating.
 
 Output: a plain-text matrix (`Mat_constA_Mbh_0.9` by default) consumed via
-`weyl_core.load_matrix("Mat_nu_disk*")` by the ray-tracing scripts.
+`general_methods.load_matrix("Mat_nu_disk*")` by the ray-tracing scripts.
 
 This is a pipeline *base* script in the execution-order sense (it must run
 before the ray tracers, since they load its output) -- distinct from
-weyl_core.py, which is the comparison basis the shared helpers were
+general_methods, which is the comparison basis the shared helpers were
 consolidated into. The shared physics core (simps, derivative, d1, d2, xi2,
 nuD, nu, lambSch, gpp, the `_i` observer-frame variants, derNU, dlamb,
-dlamb2) now lives in weyl_core.py and is imported below. `lamb_Mat` -- the
+dlamb2) now lives in general_methods and is imported below. `lamb_Mat` -- the
 expensive quadrature this script exists to run -- and the tabulation driver
 remain local: they are unique to this file among the family (see
 claude_interaction_steps.md, Interaction 3 and 4).
@@ -45,8 +45,8 @@ import cmath
 import scipy.integrate as sci
 from scipy.optimize import fsolve
 
-import weyl_core
-from weyl_core import *
+import general_methods
+from general_methods import *
 
 
 @jit
