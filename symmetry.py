@@ -15,6 +15,17 @@ Physics helpers (`d1`, `d2`, `xi2`, `nuD`, `nu`, `gpp` and their `_i`
 observer-frame variants) and the pixel-classification/mirroring loops now
 live in the shared `general_methods` package and `shadow_postprocess.py`
 respectively, rather than being copy-pasted locally.
+
+The rendering driver is exposed as `render_shadow(Mat, Mz, M, MD, b,
+out_path)`, taking the quarter-plane arrays directly (as returned by e.g.
+`test_Z_SHADOW.trace_shadow`) rather than requiring them to already be on
+disk, so it composes with other pipeline stages (see test_run_1.py). Running
+this file directly (`if __name__ == "__main__"`) still loads `Mat`/`Mz` via
+`np.loadtxt` for standalone use. The original driver's `fsolve` call solved
+for the observer's rho only to print it -- unused by the plot itself -- and
+has been dropped along with the `math.log`-on-array `TypeError` it triggered
+(see claude_interaction_steps.md's "Suggested next steps" and the end-to-end
+run notes).
 """
 
 
@@ -22,76 +33,79 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import matplotlib.colors
-from scipy.optimize import fsolve
 
-import general_methods
-from general_methods import *
 from shadow_postprocess import mirror_quadrants, classify_shadow
 
 ##############################################################################################################
 
-# Driver: load a quarter-image of the shadow (Mat, Mz) produced by one of the
-# ray tracers, classify each pixel into "captured"/"beyond disk"/"neither",
-# then reconstruct the full symmetric image by mirroring across both axes.
-start = time.time()
-M = 1.0
-MD = 0.0
-z0 = 0.0
-b = 6.0
-hder = 10**-6
-func_initial = lambda R: np.sqrt(gpp_i(R, z0, M, MD, b)) - 15.0
 
-R_initial_guess = 10.0
-R_solution = fsolve(func_initial, R_initial_guess)
+def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test"):
+    """Classify, mirror, and plot a ray-traced quarter-plane shadow.
 
-rho0 = float(R_solution)
+    Classifies each pixel of the quarter-plane (Mat, Mz) as captured /
+    beyond-disk / neither, reconstructs the full symmetric image by
+    mirroring across both axes (the physical setup is symmetric under
+    z -> -z and alfa/beta sign flips, so only one quadrant needs to be
+    ray-traced), and saves the resulting figure.
 
-print(rho0)
+    Args:
+        Mat, Mz: quarter-plane ray-tracing output (e.g. from
+            test_Z_SHADOW.trace_shadow).
+        M, MD, b: BH mass, disk mass, disk radius parameters (used for the
+            classification threshold and the plot title).
+        out_path: figure path forwarded to plt.savefig.
 
-alfa = np.linspace(-np.arctan(10/15), np.arctan(10/15), 752)
-beta = np.linspace(np.arctan(10/15), -np.arctan(10/15), 752)
+    Returns:
+        The number of captured (shadow) pixels in the full mirrored image.
+    """
+    start = time.time()
 
-Mat = np.loadtxt('Mat')
-Mz = np.loadtxt('Mz')
+    alfa = np.linspace(-np.arctan(10/15), np.arctan(10/15), 2 * Mat.shape[0])
+    beta = np.linspace(np.arctan(10/15), -np.arctan(10/15), 2 * Mat.shape[1])
+
+    # Live classification: Mz values above 49.0 are unshifted (photon escaped
+    # "backwards" past a wraparound offset of 50), Mat values above 50.0 are
+    # similarly unshifted; a pixel is "captured" (M2=1) if its unshifted radius
+    # is <= 0.002, or "beyond the disk" (M2=2) if radius > b and z escaped past
+    # the wraparound; otherwise "neither" (M2=0).
+    M2 = classify_shadow(Mat, Mz, b, unshift_mat=True, use_abs_z=False)
+
+    # Reconstruct the full image from the ray-traced quarter by mirroring across
+    # both the alfa and beta axes (z -> -z and left-right symmetry of the
+    # BH+disk configuration).
+    Msym = mirror_quadrants(M2)
+
+    count = 0
+    for i in range(len(Msym)):
+        for j in range(len(Msym)):
+            if Msym[i, j] == 1:
+                count += 1
+            else:
+                count += 0
+
+    print(count)
+
+    end = time.time()
+    print(end - start)
+    plt.figure(figsize=(15, 15))
+
+    c_map = [[0.192, 0.192, 0.192], [0, 0, 0]]
+
+    cm = matplotlib.colors.ListedColormap(c_map)
+
+    plt.imshow(Msym, cmap=cm, extent=[-beta[0], -beta[-1], alfa[0], alfa[-1]])
+
+    plt.title("$M_{BN}=$" + str(M) + " , $M_{Disk} =$" + str(MD), size=40)
+    plt.xlabel("$\\beta$", size=30)
+    plt.ylabel("$\\alpha$", size=30)
+
+    plt.tick_params(axis='both', which='major', labelsize=14)
+    plt.savefig(out_path)
+
+    return count
 
 
-
-
-# Live classification: Mz values above 49.0 are unshifted (photon escaped
-# "backwards" past a wraparound offset of 50), Mat values above 50.0 are
-# similarly unshifted; a pixel is "captured" (M2=1) if its unshifted radius
-# is <= 0.002, or "beyond the disk" (M2=2) if radius > b and z escaped past
-# the wraparound; otherwise "neither" (M2=0).
-M2 = classify_shadow(Mat, Mz, b, unshift_mat=True, use_abs_z=False)
-
-# Reconstruct the full image from the ray-traced quarter by mirroring across
-# both the alfa and beta axes (z -> -z and left-right symmetry of the
-# BH+disk configuration).
-Msym = mirror_quadrants(M2)
-
-count = 0
-for i in range(len(Msym)):
-    for j in range(len(Msym)):
-        if Msym[i, j] == 1:
-            count += 1
-        else:
-            count += 0
-
-print(count)
-
-end = time.time()
-print(end - start)
-plt.figure(figsize=(15, 15))
-
-c_map = [[0.192, 0.192, 0.192], [0, 0, 0]]
-
-cm = matplotlib.colors.ListedColormap(c_map)
-
-plt.imshow(Msym, cmap=cm, extent=[-beta[0], -beta[-1], alfa[0], alfa[-1]])
-
-plt.title("$M_{BN}=$" + str(M) + " , $M_{Disk} =$" + str(MD), size=40)
-plt.xlabel("$\\beta$", size=30)
-plt.ylabel("$\\alpha$", size=30)
-
-plt.tick_params(axis='both', which='major', labelsize=14)
-plt.savefig("Test")
+if __name__ == "__main__":
+    Mat = np.loadtxt('Mat')
+    Mz = np.loadtxt('Mz')
+    render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test")

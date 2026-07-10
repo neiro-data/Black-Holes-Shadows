@@ -24,6 +24,19 @@ classification branch (the `+50.0` z tag) that the basis test_parallel_SHADOW.py
 carries only as dead/commented code -- this is this script's distinguishing
 variant behaviour and the reason it was kept as its own file rather than
 folded into the basis (see claude_interaction_steps.md, Interaction 3).
+
+The tracing driver is exposed as `trace_shadow(M, MD, b, n, matrix_path)`,
+returning `(Mat, Mz, alfa, beta)` for composition with other pipeline stages
+(e.g. test_run_1.py). Running this file directly (`if __name__ == "__main__"`)
+still calls `trace_shadow` with the original defaults, runs the same live
+disk-crossing classification, and shows the inline matplotlib figure. The
+`fsolve`-driven observer-rho lookup now passes a scalar (`R[0]`) into
+`gpp_i`/`nu_i`/`math.log` instead of the array `fsolve` provides, and reads
+`fsolve`'s (1,)-shaped result back out via `R_solution[0]` rather than
+`float(R_solution)` -- both fix `TypeError`s from numpy's stricter
+array-to-scalar conversion under the pinned numpy version (see
+claude_interaction_steps.md's "Suggested next steps" and the end-to-end run
+notes).
 """
 
 import math
@@ -87,13 +100,15 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
         sign flip in z between consecutive steps) -- the +50.0 offset flags
         disk-crossing pixels for the classification pass in the driver below.
 
-    #NOTE: `yf` is only ever assigned inside the while loop body; if the
-    loop condition is already false on the first check, `return (yf)` would
-    reference an unbound variable. Not fixed here per instructions.
+    `yf` is initialized to the ray's starting [rho, z] before the loop so
+    that a ray failing the loop condition on the very first check still
+    returns a defined value instead of referencing an unbound variable.
     """
     Y = np.zeros((1, 4))
 
     Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
+
+    yf = [y[0], y[2]]
 
     while (nu(y[0], y[2], M, MD, b, 2) > -3.0 and np.sqrt(gpp(np.sqrt(y[0]**2 + y[2]**2), 0, M, MD, b)) < 30.0):
 
@@ -122,113 +137,116 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
 
 
-# Driver: solve for the initial observer's rho, build a small (quarter-image)
-# emission-angle grid, ray-trace it serially, classify each pixel, and show
-# (rather than save) the resulting shadow figure -- an interactive/
-# exploratory run, unlike the parallel production driver in
-# test_parallel_SHADOW.py.
-general_methods.load_matrix("Mat_nu_disk0.0")
+def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
+    """Ray-trace a quarter-image shadow grid serially.
 
-start = time.time()
-M = 1.0
-MD = 0.0
-z0 = 0.0
-b = 6.0
-hder = 10**-6
-func_initial = lambda R: np.sqrt(gpp_i(R, z0, M, MD, b)) - 15.0
+    Loads the pre-tabulated lambda matrix, solves for the initial observer's
+    rho, builds an n x n emission-angle grid (halved to one quadrant, i.e.
+    the returned arrays are n/2 x n/2), and traces one geodesic per pixel.
 
-R_initial_guess = 10.0
-R_solution = fsolve(func_initial, R_initial_guess)
+    Args:
+        M, MD, b: BH mass, disk mass, disk radius parameters.
+        n: full emission-angle grid resolution before quadrant-halving.
+        matrix_path: path to the lambda matrix produced by
+            generate_matriz.generate_lambda_matrix.
 
-rho0 = float(R_solution)
-print(rho0)
+    Returns:
+        (Mat, Mz, alfa, beta): the traced quarter-plane matrices and the
+        emission-angle arrays used to build them.
+    """
+    general_methods.load_matrix(matrix_path)
 
+    start = time.time()
+    z0 = 0.0
+    hder = 10**-6
+    func_initial = lambda R: np.sqrt(gpp_i(R[0], z0, M, MD, b)) - 15.0
 
+    R_initial_guess = 10.0
+    R_solution = fsolve(func_initial, R_initial_guess)
 
+    rho0 = float(R_solution[0])
+    print(rho0)
 
-alfaa = np.linspace(-np.arctan(10/15), np.arctan(10/15), 80)
-betaa = np.linspace(np.arctan(10/15), -np.arctan(10/15), 80)
+    alfaa = np.linspace(-np.arctan(10/15), np.arctan(10/15), n)
+    betaa = np.linspace(np.arctan(10/15), -np.arctan(10/15), n)
 
-alfa = np.linspace(alfaa[0], alfaa[int(len(alfaa)/2) - 1], int(len(alfaa)/2))
-beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
+    alfa = np.linspace(alfaa[0], alfaa[int(len(alfaa)/2) - 1], int(len(alfaa)/2))
+    beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
 
+    Mat = np.zeros((len(alfa), len(beta)))
+    Mz = np.zeros((len(alfa), len(beta)))
 
-Mat = np.zeros((len(alfa), len(beta)))
-Mz = np.zeros((len(alfa), len(beta)))
+    for i in range(len(alfa)):
+        for j in range(len(beta)):
 
-for i in range(len(alfa)):
-    for j in range(len(beta)):
+            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
+            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
 
-        y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
-        (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
+    end = time.time()
+    print(end - start)
 
-end = time.time()
-print(end - start)
-
-
-# np.savetxt('Mat',Mat)
-# np.savetxt('Mz',Mz)
-
-
-
-
-
-
-M2 = np.zeros((len(Mat), len(Mat[0])))
-Mat2 = np.zeros((len(alfa), len(beta)))
-Mz2 = np.zeros((len(alfa), len(beta)))
-
-# Live classification: Mz/Mat values above 49.0/50.0 are unshifted (the
-# +50.0 disk-crossing offset set by func() above); a pixel is "captured"
-# (M2=1) if its unshifted radius is <= 0.002, or "beyond the disk" (M2=2) if
-# radius > b and z escaped past the wraparound; otherwise "neither" (M2=0).
-for i in range(len(Mz)):
-    for j in range(len(Mz[0])):
-        if Mz[i, j] > 49.0:
-            Mz2[i, j] = Mz[i, j] - 50.0
-        else:
-            Mz2[i, j] = Mz[i, j]
-
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-        if Mat[i, j] > 50.0:
-            Mat2[i, j] = Mat[i, j] - 50.0
-        else:
-            Mat2[i, j] = Mat[i, j]
-count1 = 0
-count2 = 0
-for i in range(len(Mat)):
-    for j in range(len(Mat[0])):
-
-        if (Mat2[i, j] <= 0.002):  # and Mz[i,j] < M):
-            M2[i, j] = 1
-            count1 += 1
-
-        elif (Mat2[i, j] > b and Mz[i, j] > 49.0):
-            M2[i, j] = 2
+    return (Mat, Mz, alfa, beta)
 
 
-        else:
-            M2[i, j] = 0
-print(count1, count2)
+if __name__ == "__main__":
+    b = 6.0
+    Mat, Mz, alfa, beta = trace_shadow(M=1.0, MD=0.0, b=b, n=80, matrix_path="Mat_nu_disk0.0")
+
+    M2 = np.zeros((len(Mat), len(Mat[0])))
+    Mat2 = np.zeros((len(alfa), len(beta)))
+    Mz2 = np.zeros((len(alfa), len(beta)))
+
+    # Live classification: Mz/Mat values above 49.0/50.0 are unshifted (the
+    # +50.0 disk-crossing offset set by func() above); a pixel is "captured"
+    # (M2=1) if its unshifted radius is <= 0.002, or "beyond the disk" (M2=2) if
+    # radius > b and z escaped past the wraparound; otherwise "neither" (M2=0).
+    for i in range(len(Mz)):
+        for j in range(len(Mz[0])):
+            if Mz[i, j] > 49.0:
+                Mz2[i, j] = Mz[i, j] - 50.0
+            else:
+                Mz2[i, j] = Mz[i, j]
+
+    for i in range(len(Mat)):
+        for j in range(len(Mat[0])):
+            if Mat[i, j] > 50.0:
+                Mat2[i, j] = Mat[i, j] - 50.0
+            else:
+                Mat2[i, j] = Mat[i, j]
+    count1 = 0
+    count2 = 0
+    for i in range(len(Mat)):
+        for j in range(len(Mat[0])):
+
+            if (Mat2[i, j] <= 0.002):  # and Mz[i,j] < M):
+                M2[i, j] = 1
+                count1 += 1
+
+            elif (Mat2[i, j] > b and Mz[i, j] > 49.0):
+                M2[i, j] = 2
 
 
-plt.figure(figsize=(15, 15))
+            else:
+                M2[i, j] = 0
+    print(count1, count2)
 
 
-# c_map = [[1,1,1],[0, 0, 0], [0.192, 0.192, 0.192],[1,0,0]]
-c_map = [[1, 1, 1], [0, 0, 0], [0.192, 0.192, 0.192]]
-cm = matplotlib.colors.ListedColormap(c_map)
-
-plt.imshow(M2, cmap=cm, extent=[-beta[0], -beta[-1], alfa[0], alfa[-1]])
-# plt.colorbar()
+    plt.figure(figsize=(15, 15))
 
 
-plt.xlabel("$\\beta$", size=30)
-plt.ylabel("$\\alpha$", size=30)
+    # c_map = [[1,1,1],[0, 0, 0], [0.192, 0.192, 0.192],[1,0,0]]
+    c_map = [[1, 1, 1], [0, 0, 0], [0.192, 0.192, 0.192]]
+    cm = matplotlib.colors.ListedColormap(c_map)
 
-plt.tick_params(axis='both', which='major', labelsize=14)
-# plt.legend(loc=10, bbox_to_anchor=(0.85, 0.9), ncol=1,fontsize=17)
+    plt.imshow(M2, cmap=cm, extent=[-beta[0], -beta[-1], alfa[0], alfa[-1]])
+    # plt.colorbar()
 
-plt.show()
-# plt.savefig("Schwarzschild_Weyl_coords_154x154")
+
+    plt.xlabel("$\\beta$", size=30)
+    plt.ylabel("$\\alpha$", size=30)
+
+    plt.tick_params(axis='both', which='major', labelsize=14)
+    # plt.legend(loc=10, bbox_to_anchor=(0.85, 0.9), ncol=1,fontsize=17)
+
+    plt.show()
+    # plt.savefig("Schwarzschild_Weyl_coords_154x154")

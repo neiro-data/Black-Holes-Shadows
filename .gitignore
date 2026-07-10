@@ -17,6 +17,10 @@ __pycache__/
 *.pdf
 *.svg
 
+# test_run_1.py's output matrices (Mat_nu_disk0.0, Mat, Mz) -- untracked scratch
+# output from the end-to-end orchestrator run, not source.
+test_run_1_matrices/
+
 # SLURM job output (per my_job.sbatch)
 job_test*.out
 job_test*.err

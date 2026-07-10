@@ -397,14 +397,115 @@ from each of the three scripts were compared against the new
 Updated `README.md`'s Pipeline section to mention `shadow_postprocess.py`
 alongside the plotting scripts.
 
+## Interaction 8
+
+Made the Schwarzschild (Weyl-coordinate, `MD=0`) branch of the pipeline
+actually runnable end-to-end, fixing the environment/numba blockers flagged
+as out-of-scope in Interaction 4 and left as "Suggested next steps" above,
+and added a new orchestrator script, `test_run_1.py`.
+
+### Why this pipeline, and why now
+
+Interactions 1-7 refactored the code into shared modules, but no single run
+had produced a shadow image since those interactions began — the three
+pipeline stages (`generate_matriz.py`, one ray tracer, one plotting script)
+each executed their driver at import time with no shared entry point, plus
+mismatched filenames/configs between stages, plus the three real blockers
+below. Schwarzschild (`MD=0`) was chosen as the first end-to-end target
+because `test_Z_SHADOW.py` and `symmetry.py` already shared that config
+(`M=1.0, MD=0.0, b=6.0`), and the serial ray tracer sidesteps the
+parallel-only nested-`prange` blocker entirely.
+
+### Blockers fixed
+
+1. **`fsolve` → `gpp_i`/`nu_i` → `math.log` on a numpy array.** `fsolve`
+   passes its trial point as a length-1 array; `math.log` (called deep inside
+   `nu_i` via `d1_i`/`d2_i`) rejects non-scalar input. Fixed by unwrapping to
+   a Python scalar at the call site: `lambda R: ... gpp_i(R[0], ...)`.
+2. **`float(fsolve(...))` under the pinned numpy (2.4.6).** Separately from
+   (1), reading `fsolve`'s (1,)-shaped return value back out via
+   `float(R_solution)` now raises `TypeError: only 0-dimensional arrays can
+   be converted to Python scalars` — numpy tightened this conversion to
+   require true 0-d arrays. Fixed via `float(R_solution[0])`. Found only
+   after fixing (1) let the run reach this line; not identified by static
+   analysis, only by actually executing the pipeline.
+3. **`generate_matriz.py`'s `lamb_Mat`: bare `@jit` around `scipy.quad`.**
+   Numba has no object-mode fallback for un-parameterized `@jit` under the
+   pinned version, and `scipy.quad` can't compile in nopython mode. The
+   decorator was providing no benefit, so it was removed outright.
+
+`test_parallel_SHADOW.py`'s nested-`parallel=True` limitation (the third
+blocker from Interaction 4) was left unfixed — deliberately out of scope,
+since the serial Schwarzschild path doesn't hit it.
+
+### Driver refactor (plan-approved, user chose "refactor drivers + orchestrate"
+over a self-contained duplicate script)
+
+Each stage's import-time driver was wrapped in a callable function,
+parameter-driven instead of hardcoded, with the original module-level
+behaviour preserved under `if __name__ == "__main__":`:
+
+- **`generate_matriz.py`** → `generate_lambda_matrix(M, MD, b, n, out_path)`,
+  returning (and saving) the tabulated matrix. The dead `fsolve`/`gpp_i`
+  block (computed `rho0` but never used it) was dropped in the same pass.
+- **`test_Z_SHADOW.py`** → `trace_shadow(M, MD, b, n, matrix_path)`,
+  returning `(Mat, Mz, alfa, beta)`. Also closed the long-standing
+  possibly-unbound-`yf` note from Interaction 2/5 (`func` now initializes
+  `yf = [y[0], y[2]]` before the loop) since it was touched anyway.
+- **`symmetry.py`** → `render_shadow(Mat, Mz, M, MD, b, out_path)`, taking
+  the quarter-plane arrays directly instead of requiring `Mat`/`Mz` on disk
+  first, so it composes with `trace_shadow`'s return value. Its `fsolve`
+  call was dropped entirely — `rho0` was only ever printed, not used by the
+  plot.
+
+No geodesic, classification, or mirroring logic was duplicated; the new
+functions call the same `geo`/`func`/`shadow_postprocess` code already
+established in Interactions 4-7.
+
+### New `test_run_1.py`
+
+Orchestrates the three functions above at a small/fast resolution (200x200
+lambda matrix, 40x40 shadow grid before quadrant-halving) chosen so a first
+sanity run completes in well under a minute rather than the multi-hour
+1200x1200/80x80 production sizes. Writes the matrix outputs
+(`Mat_nu_disk0.0`, `Mat`, `Mz`) to a new `test_run_1_matrices/` directory
+(added to `.gitignore`) and the shadow figure to `image_generation/`.
+
+### Verification
+
+Ran `uv run python test_run_1.py` to completion: all three stages executed
+without error, produced a 376-pixel captured-shadow region (real count from
+`classify_shadow`'s `M2 == 1` mask, not read off the plot), and saved
+`image_generation/schwarzschild_shadow.png` showing a clear dark shadow disk
+against the lighter escaped-ray background — visually inspected and
+confirmed physically sensible.
+
+### Known cosmetic issue, not fixed
+
+`symmetry.py`'s plot uses a 2-color `ListedColormap` (`c_map` has 2 entries)
+to render `classify_shadow`'s 3-valued `{0, 1, 2}` output, which — because
+`MD=0` still runs the `b`/beyond-disk comparison even with no disk present —
+produces faint banding rings inside the rendered shadow. This is a
+pre-existing quirk of `symmetry.py`'s original color mapping (predates this
+interaction), not a defect in the underlying classification (the printed
+pixel count is correct); left as-is rather than silently changed, matching
+this repo's established "preserve real behavioural differences, don't
+silently fix them" convention (see Interaction 3, `classify_shadow`'s
+`unshift_mat`/`use_abs_z` flags in Interaction 7).
+
 ## Suggested next steps (not yet done)
 
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.
 - Consider threading `Mat_nu` as an explicit `lamb` parameter instead of a
   module global set via `load_matrix` (deferred/provisional design choice from
   this interaction).
-- The three pre-existing environment/numba issues found above (fsolve/math.log,
-  bare-`@jit`+`scipy.quad`, nested-`parallel=True`) are unrelated to this
-  refactor but block actually running any of these scripts end-to-end under the
-  currently pinned dependency versions; worth a dedicated pass if these scripts
-  need to run again.
+- `test_parallel_SHADOW.py`'s nested-`parallel=True` limitation is still
+  unfixed; running the parallel/production-resolution path needs a dedicated
+  numba-nesting fix.
+- `symmetry.py`'s 2-color shadow plot doesn't distinguish "beyond disk" from
+  "captured" pixels (see the cosmetic issue noted in Interaction 8); worth a
+  3-color `c_map` if that classification is ever needed for a non-`MD=0` run.
+- `README.md`'s Pipeline section still describes the pre-Interaction-8 driver
+  scripts; could be updated to mention `test_run_1.py` and the new
+  `generate_lambda_matrix`/`trace_shadow`/`render_shadow` function-call
+  pattern.
