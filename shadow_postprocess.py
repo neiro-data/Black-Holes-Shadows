@@ -43,7 +43,7 @@ def mirror_quadrants(A, antisymmetric=False):
 
 
 def classify_shadow(mat, mz, b, capture_r=0.002, mz_escape=49.0,
-                     unshift_mat=False, use_abs_z=True):
+                     unshift_mat=False, use_abs_z=True, include_beyond_disk=True):
     """Classify each pixel of a shadow image as captured/beyond-disk/neither.
 
     Returns an array of the same shape as mat with values:
@@ -75,6 +75,9 @@ def classify_shadow(mat, mz, b, capture_r=0.002, mz_escape=49.0,
             before applying the thresholds.
         use_abs_z: If True, compare abs(mz) against mz_escape; if False,
             compare the raw mz against mz_escape (no lower bound).
+        include_beyond_disk: If False, skip the beyond-disk (2) classification
+            entirely -- for a pure BH-shadow render with no disk, e.g. when
+            paired with a tracer run with use_disk=False.
 
     Returns:
         A new numpy array of the same shape as mat with values in {0, 1, 2}.
@@ -83,5 +86,6 @@ def classify_shadow(mat, mz, b, capture_r=0.002, mz_escape=49.0,
     z = np.abs(mz) if use_abs_z else mz
     M = np.zeros_like(mat_u)
     M[mat_u <= capture_r] = 1
-    M[(M != 1) & (mat_u > b) & (z > mz_escape)] = 2
+    if include_beyond_disk:
+        M[(M != 1) & (mat_u > b) & (z > mz_escape)] = 2
     return M

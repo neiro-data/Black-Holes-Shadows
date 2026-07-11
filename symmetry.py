@@ -19,7 +19,7 @@ respectively, rather than being copy-pasted locally.
 The rendering driver is exposed as `render_shadow(Mat, Mz, M, MD, b,
 out_path)`, taking the quarter-plane arrays directly (as returned by e.g.
 `test_Z_SHADOW.trace_shadow`) rather than requiring them to already be on
-disk, so it composes with other pipeline stages (see test_run_1.py). Running
+disk, so it composes with other pipeline stages (see test_run_schwarzschild.py). Running
 this file directly (`if __name__ == "__main__"`) still loads `Mat`/`Mz` via
 `np.loadtxt` for standalone use. The original driver's `fsolve` call solved
 for the observer's rho only to print it -- unused by the plot itself -- and
@@ -39,7 +39,7 @@ from shadow_postprocess import mirror_quadrants, classify_shadow
 ##############################################################################################################
 
 
-def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test"):
+def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test", use_disk=True):
     """Classify, mirror, and plot a ray-traced quarter-plane shadow.
 
     Classifies each pixel of the quarter-plane (Mat, Mz) as captured /
@@ -54,6 +54,8 @@ def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test"):
         M, MD, b: BH mass, disk mass, disk radius parameters (used for the
             classification threshold and the plot title).
         out_path: figure path forwarded to plt.savefig.
+        use_disk: If False, skip the beyond-disk classification for a pure
+            BH-shadow render (pair with a tracer run using use_disk=False).
 
     Returns:
         The number of captured (shadow) pixels in the full mirrored image.
@@ -68,7 +70,8 @@ def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test"):
     # similarly unshifted; a pixel is "captured" (M2=1) if its unshifted radius
     # is <= 0.002, or "beyond the disk" (M2=2) if radius > b and z escaped past
     # the wraparound; otherwise "neither" (M2=0).
-    M2 = classify_shadow(Mat, Mz, b, unshift_mat=True, use_abs_z=False)
+    M2 = classify_shadow(Mat, Mz, b, unshift_mat=True, use_abs_z=False,
+                          include_beyond_disk=use_disk)
 
     # Reconstruct the full image from the ray-traced quarter by mirroring across
     # both the alfa and beta axes (z -> -z and left-right symmetry of the
