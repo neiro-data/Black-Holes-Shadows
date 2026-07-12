@@ -15,7 +15,7 @@ saves it to disk. The ray tracers then bilinearly interpolate this saved
 matrix at runtime (see `general_methods.lamb()`) instead of re-integrating.
 
 The tabulation driver is exposed as `generate_lambda_matrix(M, MD, b, n,
-out_path)`, callable directly (e.g. from test_run_1.py) or run standalone via
+out_path)`, callable directly (e.g. from test_run_schwarzschild.py) or run standalone via
 `if __name__ == "__main__"`, which reproduces the original
 `Mat_constA_Mbh_0.9` (M=0.9, MD=0.1, b=3.0, n=1200) default. Output is a
 plain-text matrix consumed via `general_methods.load_matrix(...)` by the
@@ -122,7 +122,7 @@ def generate_lambda_matrix(M=1.0, MD=0.0, b=6.0, n=1200, out_path="Mat_nu_disk0.
     return nu_Mat
 
 
-if __name__ == "__main__":
-    generate_lambda_matrix(M=0.9, MD=0.1, b=3.0, n=1200, out_path="Mat_constA_Mbh_0.9")
+#if __name__ == "__main__":
+#    generate_lambda_matrix(M=0.9, MD=0.1, b=3.0, n=1200, out_path="Mat_constA_Mbh_0.9")
 
 ########################################################################################

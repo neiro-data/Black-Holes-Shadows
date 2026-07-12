@@ -493,6 +493,67 @@ this repo's established "preserve real behavioural differences, don't
 silently fix them" convention (see Interaction 3, `classify_shadow`'s
 `unshift_mat`/`use_abs_z` flags in Interaction 7).
 
+## Interaction 9
+
+Added a `use_disk` toggle so the Schwarzschild (`MD=0`) pipeline can render a
+*pure* black-hole shadow — a solid dark disk with no surrounding ring —
+directly addressing the cosmetic banding/ring artifact flagged as a known
+issue at the end of Interaction 8. Also reorganized the end-to-end run into a
+dedicated `test_runs/` area.
+
+### Root cause of the unwanted "disk"
+
+Even with `MD=0` (no disk mass in the metric), the rendered image showed an
+accretion-disk-style ring. The ring was **not** coming from the spacetime — it
+was produced entirely by the ray *classification*:
+
+- `test_Z_SHADOW.trace_shadow` (the disk-crossing-*enabled* serial tracer used
+  by the orchestrator) tags every ray that crosses the equatorial plane beyond
+  `rho > b` with a `+50.0` z offset in `func`'s "Pontos do Disco" branch.
+- `shadow_postprocess.classify_shadow` then reads that tag and marks those
+  pixels as "beyond the disk" (`M2 = 2`), which `render_shadow` paints as the
+  extra ring(s).
+
+The repo already contained the pure-shadow variant (`test_parallel_SHADOW.py`,
+whose `func` omits that branch), so the capability was never lost — the
+orchestrator had simply wired up the disk-crossing tracer. Chosen fix (user
+plan-approved: "use_disk flag on the serial path"): thread an opt-out flag
+through the existing serial pipeline rather than duplicating a tracer or
+refactoring the parallel one's inline driver.
+
+### Changes
+
+- **`test_Z_SHADOW.py`** — `func(...)` and `trace_shadow(...)` gained a
+  `use_disk=True` parameter; when `False`, the `rho > b` disk-crossing branch
+  is skipped entirely, giving a pure BH-shadow trace (matching
+  `test_parallel_SHADOW.py`). `func` is jitted, and the plain-`bool` argument
+  compiles cleanly under numba (verified in both `True`/`False` cases).
+- **`shadow_postprocess.py`** — `classify_shadow(...)` gained
+  `include_beyond_disk=True`; when `False`, the beyond-disk (`M2 = 2`)
+  assignment is skipped, leaving only captured (1) / neither (0).
+- **`symmetry.py`** — `render_shadow(...)` gained `use_disk=True`, forwarded as
+  `include_beyond_disk=use_disk` into `classify_shadow`.
+- **Orchestrator moved & renamed.** `test_run_1.py` → new
+  `test_runs/generate_Schwarzschild_no_disk/test_run_schwarzschild.py`. It sets
+  `USE_DISK = False` and threads it into both `trace_shadow` and
+  `render_shadow`. Because the script now lives two directories below the repo
+  root (not one), its `REPO_ROOT` sys.path computation was deepened by one more
+  `os.path.dirname`, and output paths remain anchored to the script's own
+  folder via `SCRIPT_DIR` so matrices/figures follow the script automatically.
+- **New `test_runs/Test_Results.md`** — documents this first pure-Schwarzschild
+  run (parameters, pipeline stages, and the resulting shadow image).
+
+### Verification
+
+- Unit check on the new flag: `classify_shadow` on a synthesized array yields a
+  beyond-disk pixel with `include_beyond_disk=True` and none with `False`.
+- numba smoke test: tabulated a small lambda matrix, loaded it, and called the
+  jitted `func` with `use_disk` both `False` and `True` — both compiled and ran.
+- Import-path check from the new folder depth: `REPO_ROOT` resolves to the repo
+  root and all three pipeline modules import successfully.
+- End-to-end: user ran the orchestrator and visually confirmed a clean
+  Schwarzschild shadow with **no** ring (see `Test_Results.md`).
+
 ## Suggested next steps (not yet done)
 
 - Give the `np.savetxt` outputs consistent, `.gitignore`-friendly extensions.
@@ -503,8 +564,10 @@ silently fix them" convention (see Interaction 3, `classify_shadow`'s
   unfixed; running the parallel/production-resolution path needs a dedicated
   numba-nesting fix.
 - `symmetry.py`'s 2-color shadow plot doesn't distinguish "beyond disk" from
-  "captured" pixels (see the cosmetic issue noted in Interaction 8); worth a
-  3-color `c_map` if that classification is ever needed for a non-`MD=0` run.
+  "captured" pixels (see the cosmetic issue noted in Interaction 8). For the
+  `MD=0` case this is now sidestepped by `use_disk=False` (Interaction 9), which
+  drops the beyond-disk class entirely; a 3-color `c_map` would still be worth
+  it if that classification is ever needed for a non-`MD=0`, disk-enabled run.
 - `README.md`'s Pipeline section still describes the pre-Interaction-8 driver
   scripts; could be updated to mention `test_run_1.py` and the new
   `generate_lambda_matrix`/`trace_shadow`/`render_shadow` function-call

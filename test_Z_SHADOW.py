@@ -27,7 +27,7 @@ folded into the basis (see claude_interaction_steps.md, Interaction 3).
 
 The tracing driver is exposed as `trace_shadow(M, MD, b, n, matrix_path)`,
 returning `(Mat, Mz, alfa, beta)` for composition with other pipeline stages
-(e.g. test_run_1.py). Running this file directly (`if __name__ == "__main__"`)
+(e.g. test_run_schwarzschild.py). Running this file directly (`if __name__ == "__main__"`)
 still calls `trace_shadow` with the original defaults, runs the same live
 disk-crossing classification, and shows the inline matplotlib figure. The
 `fsolve`-driven observer-rho lookup now passes a scalar (`R[0]`) into
@@ -80,7 +80,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True)
-def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
+def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, use_disk=True):
     """Single-ray tracer: integrates one photon's geodesic until escape, capture, or crossing the disk plane.
 
     Repeatedly advances the state with `run_kut4_mod` while the photon's nu
@@ -93,6 +93,10 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
         alfa, beta: emission angles.
         M, rho0, z0, MD, b, hder: BH mass, initial emission point, disk
             mass, disk radius, finite-difference step.
+        use_disk: If True (default), tag rays that cross the disk plane
+            beyond b with the +50.0 z offset. If False, disable that branch
+            entirely, giving a pure BH-shadow trace with no disk
+            classification (matches test_parallel_SHADOW.py's behaviour).
 
     Returns:
         [rho, z] at the escape point, [0.001, 0.001] if captured, or
@@ -128,7 +132,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
         ####   Pontos do Disco    #####
 
-        elif (y[0] > b and np.sign(Y[-1][2]) == - np.sign(Y[-2][2])):
+        elif (use_disk and y[0] > b and np.sign(Y[-1][2]) == - np.sign(Y[-2][2])):
             yf = [Y[-1][0], Y[-1][2] + 50.0]
             break
 
@@ -136,8 +140,8 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
 
 
-
-def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
+@jit(nopython = True)
+def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_disk=True):
     """Ray-trace a quarter-image shadow grid serially.
 
     Loads the pre-tabulated lambda matrix, solves for the initial observer's
@@ -149,6 +153,8 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
         n: full emission-angle grid resolution before quadrant-halving.
         matrix_path: path to the lambda matrix produced by
             generate_matriz.generate_lambda_matrix.
+        use_disk: forwarded to `func`; if False, disables disk-crossing
+            classification for a pure BH-shadow trace.
 
     Returns:
         (Mat, Mz, alfa, beta): the traced quarter-plane matrices and the
@@ -180,7 +186,7 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
         for j in range(len(beta)):
 
             y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
-            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
+            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, use_disk)
 
     end = time.time()
     print(end - start)
