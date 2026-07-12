@@ -493,45 +493,9 @@ this repo's established "preserve real behavioural differences, don't
 silently fix them" convention (see Interaction 3, `classify_shadow`'s
 `unshift_mat`/`use_abs_z` flags in Interaction 7).
 
+
 ## Interaction 9
 
-Branch: `numba-optimization` (created from `main`).
-
-### Problem
-
-In `test_Z_SHADOW.py`, numba never covered the per-pixel work of
-`trace_shadow`. The function is plain Python and its double loop over emission
-angles ran in the interpreter, merely dispatching into the jitted `func` once
-per pixel -- so the loop itself (array construction, `dr`/`dthe` calls, control
-flow) stayed uncompiled. The setup also mixes in things numba cannot compile in
-nopython mode: the `func_initial` `lambda`, the `scipy.optimize.fsolve`
-observer-rho lookup, `general_methods.load_matrix`, and `time`/`print`.
-
-### Steps taken
-
-1. Split `trace_shadow` into three functions:
-   - `_solve_observer_rho(M, MD, b, z0)` -- plain Python; isolates the
-     numba-incompatible `lambda` + `fsolve` root find, returns `rho0`.
-   - `_trace_grid(rho0, z0, M, MD, b, alfa, beta, hder)` --
-     `@jit(nopython=True)`; the extracted pixel loop that builds each photon's
-     initial state (`dr`/`dthe`) and calls the jitted `func`, populating and
-     returning `(Mat, Mz)`. This is the only new jitted piece and lets numba
-     compile the whole loop instead of just the per-call `func`.
-   - `trace_shadow(...)` -- unchanged signature and `(Mat, Mz, alfa, beta)`
-     return; loads the matrix, times, builds the angle grids, calls the two
-     helpers, prints.
-2. Updated the module docstring to document the split and the JIT-coverage
-   motivation.
-
-### Verification
-
-- Structural: `trace_shadow` and `_solve_observer_rho` are plain Python;
-  `_trace_grid` is a numba Dispatcher.
-- End-to-end smoke test: generated a coarse lambda matrix (`n=120`) and ran
-  `trace_shadow(n=20)` -- printed `rho0`≈13.96 and elapsed time, returned finite
-  `(10, 10)` `Mat`/`Mz` with 22 captured shadow pixels (unchanged from the
-  pre-split loop, which was copied verbatim). Crucially `_trace_grid.signatures`
-  had 1 entry afterwards, confirming numba compiled the loop.
 Added a `use_disk` toggle so the Schwarzschild (`MD=0`) pipeline can render a
 *pure* black-hole shadow — a solid dark disk with no surrounding ring —
 directly addressing the cosmetic banding/ring artifact flagged as a known
@@ -609,3 +573,118 @@ refactoring the parallel one's inline driver.
   scripts; could be updated to mention `test_run_1.py` and the new
   `generate_lambda_matrix`/`trace_shadow`/`render_shadow` function-call
   pattern.
+
+
+## Interaction 10
+
+Extended numba's JIT coverage in `test_Z_SHADOW.py` by splitting `trace_shadow`
+so the per-pixel emission-angle loop — previously running in the Python
+interpreter and only dispatching into the jitted `func` once per pixel — is
+itself compiled, while isolating the numba-incompatible setup (the `fsolve`
+observer-rho lookup, matrix loading, timing/printing) into plain-Python helpers.
+
+Branch: `numba-optimization` (created from `main`).
+
+### Problem
+
+In `test_Z_SHADOW.py`, numba never covered the per-pixel work of
+`trace_shadow`. The function is plain Python and its double loop over emission
+angles ran in the interpreter, merely dispatching into the jitted `func` once
+per pixel -- so the loop itself (array construction, `dr`/`dthe` calls, control
+flow) stayed uncompiled. The setup also mixes in things numba cannot compile in
+nopython mode: the `func_initial` `lambda`, the `scipy.optimize.fsolve`
+observer-rho lookup, `general_methods.load_matrix`, and `time`/`print`.
+
+### Steps taken
+
+1. Split `trace_shadow` into three functions:
+   - `_solve_observer_rho(M, MD, b, z0)` -- plain Python; isolates the
+     numba-incompatible `lambda` + `fsolve` root find, returns `rho0`.
+   - `_trace_grid(rho0, z0, M, MD, b, alfa, beta, hder)` --
+     `@jit(nopython=True)`; the extracted pixel loop that builds each photon's
+     initial state (`dr`/`dthe`) and calls the jitted `func`, populating and
+     returning `(Mat, Mz)`. This is the only new jitted piece and lets numba
+     compile the whole loop instead of just the per-call `func`.
+   - `trace_shadow(...)` -- unchanged signature and `(Mat, Mz, alfa, beta)`
+     return; loads the matrix, times, builds the angle grids, calls the two
+     helpers, prints.
+2. Updated the module docstring to document the split and the JIT-coverage
+   motivation.
+
+### Verification
+
+- Structural: `trace_shadow` and `_solve_observer_rho` are plain Python;
+  `_trace_grid` is a numba Dispatcher.
+- End-to-end smoke test: generated a coarse lambda matrix (`n=120`) and ran
+  `trace_shadow(n=20)` -- printed `rho0`≈13.96 and elapsed time, returned finite
+  `(10, 10)` `Mat`/`Mz` with 22 captured shadow pixels (unchanged from the
+  pre-split loop, which was copied verbatim). Crucially `_trace_grid.signatures`
+  had 1 entry afterwards, confirming numba compiled the loop.
+
+
+## Interaction 11
+
+Branch: `fix-numba-optimization` (existing branch; built on top of its
+in-flight numba/JIT work, which is left untouched and committed separately).
+
+### Problem
+
+`Mat_nu` (the pre-tabulated lambda-potential lookup table) was a module-level
+global in `general_methods/mathematical_formulas.py`, initialized to `None` and
+rebound at runtime by `load_matrix` via `global Mat_nu`. But `lamb` — which
+reads `Mat_nu` — is `@jit(nopython=True)`, and numba freezes globals as
+compile-time constants in nopython mode. So numba refused to load the
+reassigned/`None` global (`"Mat_nu cannot be loaded as a global variable"`),
+and even when it compiled, a later `load_matrix` of a different table never
+reached the already-compiled `lamb`. The design was flagged as provisional in
+`general_methods/__init__.py`, naming the fix: pass the matrix as a parameter.
+
+### Steps taken
+
+Threaded `Mat_nu` as an explicit trailing parameter through every jitted
+function that transitively calls `lamb` (`lamb` → `grr`/`gzz` → `dr`/`dthe`,
+and each script's `geo`; `func` reaches `geo` via `run_kut4_mod`'s `*args`, so
+`run_kut4_mod` itself was unchanged). Functions that never touch `lamb`
+(`gtt`, `gpp`, `zeta`, `Pt`, `Pphi`, `dphi`, `dt`) were left alone.
+
+1. `mathematical_formulas.py`: removed the `Mat_nu = None` global; `load_matrix`
+   now just returns `np.loadtxt(path)`. Its decorator was kept at the user's
+   request but corrected `@jit(nopython=False)` → `@jit(forceobj=True)`:
+   modern numba (0.66) no longer auto-falls back to object mode for
+   `nopython=False`, so it tried to compile `np.loadtxt` in nopython and failed;
+   `forceobj=True` genuinely runs it in object mode. `lamb` gained a trailing
+   `Mat_nu` arg.
+2. `spacetime_metrics.py`: `grr`, `gzz`, `dr`, `dthe` gained a trailing `Mat_nu`;
+   the `Metric`/`MetricDerivatives` convenience classes now bind `Mat_nu` in
+   `__init__` and forward it.
+3. `test_parallel_SHADOW.py`, `test_Z_SHADOW.py`, `test_symmetry_lensing.py`:
+   `geo`/`func`/drivers gained/forward `Mat_nu`; drivers now do
+   `Mat_nu = general_methods.load_matrix(...)` and thread it into
+   `f_paral`/`_trace_grid`/`func` and the `dr`/`dthe` initial-state calls.
+   `lensing_r_theta.py`'s unrelated Kerr `lamb` and `generate_matriz.py` (the
+   matrix producer) were left untouched.
+4. Updated the "provisional" note in `general_methods/__init__.py` and the
+   relevant `lamb`/`load_matrix`/geo/func docstrings.
+
+Note: `python-pro`/`code-reviewer` agents referenced in the repo workflow are
+not configured in this environment; the edits were made directly.
+
+### Verification
+
+Small smoke test (numba 0.66, generated coarse `n=40` lambda tables):
+- `load_matrix` returns a 2-D array; `lamb`/`grr`/`gzz`/`dr`/`dthe` compile and
+  return finite values with an explicit `Mat_nu`.
+- Reloadability proven: `lamb(rho, z, …, mat_a) != lamb(rho, z, …, mat_b)` for
+  two different matrices — impossible under the old frozen global.
+- `test_Z_SHADOW` `geo`/`func` traced pixels to finite output; the
+  `geo→func→run_kut4_mod→lamb(Mat_nu)` chains in `test_parallel_SHADOW` and
+  `test_symmetry_lensing` compiled with no arity/typing error (the latter ran a
+  tiny grid to completion).
+- `py_compile` passed on all six changed files. ruff is not part of this repo's
+  toolchain, so it was not run.
+
+Pre-existing, unrelated defects observed while running the drivers (NOT fixed
+here, in code this change does not touch): the `_i` observer-rho path
+(`gpp_i → nu_i`, and `float(fsolve(...))`) fails under numpy 2 on 1-D array
+input, and `test_parallel_SHADOW` hits the documented numba workqueue
+"Concurrent access" abort.
