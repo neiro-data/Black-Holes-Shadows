@@ -60,7 +60,6 @@ def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test", use_disk=True)
     Returns:
         The number of captured (shadow) pixels in the full mirrored image.
     """
-    start = time.time()
 
     alfa = np.linspace(-np.arctan(10/15), np.arctan(10/15), 2 * Mat.shape[0])
     beta = np.linspace(np.arctan(10/15), -np.arctan(10/15), 2 * Mat.shape[1])
@@ -86,10 +85,6 @@ def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test", use_disk=True)
             else:
                 count += 0
 
-    print(count)
-
-    end = time.time()
-    print(end - start)
     plt.figure(figsize=(15, 15))
 
     c_map = [[0.192, 0.192, 0.192], [0, 0, 0]]
@@ -107,8 +102,9 @@ def render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test", use_disk=True)
 
     return count
 
-
+"""
 if __name__ == "__main__":
     Mat = np.loadtxt('Mat')
     Mz = np.loadtxt('Mz')
     render_shadow(Mat, Mz, M=1.0, MD=0.0, b=6.0, out_path="Test")
+"""

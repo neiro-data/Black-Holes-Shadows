@@ -15,17 +15,17 @@ __all__ = [
     "simps", "derivative", "run_kut4_mod", "lamb", "load_matrix",
 ]
 
-# Bilinear-interpolation source matrix for `lamb`; set via `load_matrix`
-# before any `lamb`/grr/gzz/dr/dthe/geo call.
-Mat_nu = None
-
-
+# forceobj=True: this does file I/O (np.loadtxt), which numba cannot compile in
+# nopython mode; modern numba (>=0.59) no longer auto-falls back to object mode
+# for nopython=False, so object mode must be requested explicitly.
+#@jit(forceobj=True)
 def load_matrix(path):
-    """Load the pre-tabulated lambda-potential matrix (produced by
-    generate_matriz.py) into the module-level `Mat_nu` used by `lamb`."""
-    global Mat_nu
-    Mat_nu = np.loadtxt(path)
-    return Mat_nu
+    """Load and return the pre-tabulated lambda-potential matrix (produced by
+    generate_matriz.py). The returned array must be passed explicitly as the
+    `Mat_nu` argument to `lamb`/grr/gzz/dr/dthe and each script's geo/func --
+    it is no longer stored in a module-level global (numba freezes nopython
+    globals as compile-time constants, so a reloadable global cannot work)."""
+    return np.loadtxt(path)
 
 
 @jit(nopython=True)
@@ -87,18 +87,20 @@ def derivative(f, l, x, y, hder, *args):
 
 
 @jit(nopython=True)
-def lamb(rho, z, M, MD, b, m):
-    """Bilinear interpolation of lambda(rho, z) from the preloaded matrix `Mat_nu`.
+def lamb(rho, z, M, MD, b, m, Mat_nu):
+    """Bilinear interpolation of lambda(rho, z) from the lambda matrix `Mat_nu`.
 
-    `Mat_nu` (set via `load_matrix`, from a matrix produced by
-    generate_matriz.py's `lamb_Mat` quadrature) is indexed on a zref=Rref=40
-    grid; (i0, j0) are the integer grid indices below the target point and
-    (I, J) are the fractional interpolation weights within that grid cell.
+    `Mat_nu` (obtained from `load_matrix`, from a matrix produced by
+    generate_matriz.py's `lamb_Mat` quadrature) is passed in explicitly and
+    indexed on a zref=Rref=40 grid; (i0, j0) are the integer grid indices below
+    the target point and (I, J) are the fractional interpolation weights within
+    that grid cell.
 
     Args:
         rho, z: target Weyl coordinates.
-        M, MD, b, m: unused here except implicitly via the preloaded matrix
-            (kept in the signature for interface parity with `nu`/`lamb_Mat`).
+        M, MD, b, m: unused here except implicitly via `Mat_nu` (kept in the
+            signature for interface parity with `nu`/`lamb_Mat`).
+        Mat_nu: the pre-tabulated lambda-potential matrix (from `load_matrix`).
 
     Returns:
         Bilinearly-interpolated lambda(rho, z).

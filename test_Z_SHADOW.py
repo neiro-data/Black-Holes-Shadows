@@ -27,7 +27,7 @@ folded into the basis (see claude_interaction_steps.md, Interaction 3).
 
 The tracing driver is exposed as `trace_shadow(M, MD, b, n, matrix_path)`,
 returning `(Mat, Mz, alfa, beta)` for composition with other pipeline stages
-(e.g. test_run_1.py). `trace_shadow` is a plain-Python orchestrator split into
+(e.g. test_run_NAME.py). `trace_shadow` is a plain-Python orchestrator split into
 two helpers so numba's JIT actually covers the per-pixel work: the double loop
 over emission angles used to run in pure Python (dispatching into the jitted
 `func` once per pixel), so the loop itself -- array construction, `dr`/`dthe`
@@ -61,7 +61,7 @@ from general_methods import *
 
 
 @jit(nopython=True)
-def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
+def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder, Mat_nu):
     """Geodesic equations of motion (right-hand side), via the Weyl nu/lambda potentials and their derivatives.
 
     Args:
@@ -71,6 +71,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
         alfa, beta: photon emission angles at the initial point.
         rho0, z0: initial emission point.
         hder: finite-difference step used inside derNU.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), passed to `lamb`.
 
     Returns:
         np.array([drho, d2rho, dz, d2z]).
@@ -78,9 +79,9 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     pphi = Pphi(rho0, z0, M, MD, b, alfa, beta)
     pt = Pt(rho0, z0, M, MD, b, alfa, beta)
 
-    d2Rdt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))*derNU(z[0], z[2], M, MD, b, 0, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 + 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]*z[3] - 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2))*z[0]*(-2 + z[0]*derNU(z[0], z[2], M, MD, b, 0, 2, hder))*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
+    d2Rdt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*derNU(z[0], z[2], M, MD, b, 0, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 + 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]*z[3] - 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*z[0]*(-2 + z[0]*derNU(z[0], z[2], M, MD, b, 0, 2, hder))*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
 
-    d2Thedt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))*derNU(z[0], z[2], M, MD, b, 1, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 - 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]*z[3] + 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2))*z[0]**2*derNU(z[0], z[2], M, MD, b, 1, 2, hder)*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
+    d2Thedt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*derNU(z[0], z[2], M, MD, b, 1, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 - 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]*z[3] + 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*z[0]**2*derNU(z[0], z[2], M, MD, b, 1, 2, hder)*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
 
 
 
@@ -89,7 +90,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True)
-def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, use_disk=True):
+def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, Mat_nu, use_disk=True):
     """Single-ray tracer: integrates one photon's geodesic until escape, capture, or crossing the disk plane.
 
     Repeatedly advances the state with `run_kut4_mod` while the photon's nu
@@ -102,6 +103,8 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, use_disk=True):
         alfa, beta: emission angles.
         M, rho0, z0, MD, b, hder: BH mass, initial emission point, disk
             mass, disk radius, finite-difference step.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), forwarded
+            to `geo` via `run_kut4_mod`.
         use_disk: If True (default), tag rays that cross the disk plane
             beyond b with the +50.0 z offset. If False, disable that branch
             entirely, giving a pure BH-shadow trace with no disk
@@ -125,7 +128,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, use_disk=True):
 
     while (nu(y[0], y[2], M, MD, b, 2) > -3.0 and np.sqrt(gpp(np.sqrt(y[0]**2 + y[2]**2), 0, M, MD, b)) < 30.0):
 
-        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
+        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder, Mat_nu)
 
         Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
 
@@ -176,7 +179,7 @@ def _solve_observer_rho(M, MD, b, z0):
 
 
 @jit(nopython=True)
-def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder):
+def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu, use_disk):
     """JIT-compiled hot loop: trace one geodesic per (alfa, beta) pixel.
 
     This is the pure numerical work extracted from `trace_shadow` so numba
@@ -189,6 +192,9 @@ def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder):
         M, MD, b: BH mass, disk mass, disk radius parameters.
         alfa, beta: the (already quadrant-halved) emission-angle arrays.
         hder: finite-difference step forwarded to the geodesic RHS.
+        Mat_nu: the pre-tabulated lambda matrix (from `load_matrix`), threaded
+            through dr/dthe/func/geo to `lamb`.
+        use_disk: forwarded to `func`; see its docstring.
 
     Returns:
         (Mat, Mz): the traced quarter-plane final rho/z matrices.
@@ -199,25 +205,30 @@ def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder):
     for i in range(len(alfa)):
         for j in range(len(beta)):
 
-            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
-            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
+            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j], Mat_nu), z0, dthe(rho0, z0, M, MD, b, alfa[i], Mat_nu)])
+            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, Mat_nu, use_disk)
 
+    
     return (Mat, Mz)
 
 
-def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
 @jit(nopython = True)
-def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_disk=True):
+def trace_shadow(Mat_nu, rho0, M=1.0, MD=0.0, b=6.0, 
+                 z0=0.0, n=80, hder=10**-6, 
+                 matrix_path="Mat_nu_disk0.0", use_disk=True):
     """Ray-trace a quarter-image shadow grid serially.
 
-    Plain-Python orchestrator: loads the pre-tabulated lambda matrix, solves
-    for the initial observer's rho (`_solve_observer_rho`), builds an n x n
-    emission-angle grid (halved to one quadrant, i.e. the returned arrays are
-    n/2 x n/2), and delegates the per-pixel geodesic tracing to the JIT-compiled
-    `_trace_grid` so the whole pixel loop compiles instead of running in pure
-    Python.
+    Plain-Python orchestrator: loads the pre-tabulated lambda matrix, builds an
+    n x n emission-angle grid (halved to one quadrant, i.e. the returned arrays
+    are n/2 x n/2), and delegates the per-pixel geodesic tracing to the
+    JIT-compiled `_trace_grid` so the whole pixel loop compiles instead of
+    running in pure Python. The observer's initial rho is now solved by the
+    caller (via `_solve_observer_rho`) and passed in, matching the sibling
+    test_parallel_SHADOW.py driver.
 
     Args:
+        rho0: observer's initial rho (from `_solve_observer_rho`), solved by
+            the caller once the lambda matrix is loaded.
         M, MD, b: BH mass, disk mass, disk radius parameters.
         n: full emission-angle grid resolution before quadrant-halving.
         matrix_path: path to the lambda matrix produced by
@@ -229,13 +240,8 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_d
         (Mat, Mz, alfa, beta): the traced quarter-plane matrices and the
         emission-angle arrays used to build them.
     """
-    general_methods.load_matrix(matrix_path)
+    #Mat_nu = general_methods.load_matrix(matrix_path)
 
-    start = time.time()
-    z0 = 0.0
-    hder = 10**-6
-
-    rho0 = _solve_observer_rho(M, MD, b, z0)
     print(rho0)
 
     alfaa = np.linspace(-np.arctan(10/15), np.arctan(10/15), n)
@@ -244,25 +250,23 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_d
     alfa = np.linspace(alfaa[0], alfaa[int(len(alfaa)/2) - 1], int(len(alfaa)/2))
     beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
 
-    (Mat, Mz) = _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder)
-    Mat = np.zeros((len(alfa), len(beta)))
-    Mz = np.zeros((len(alfa), len(beta)))
-
-    for i in range(len(alfa)):
-        for j in range(len(beta)):
-
-            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
-            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, use_disk)
-
-    end = time.time()
-    print(end - start)
+    (Mat, Mz) = _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu, use_disk)
 
     return (Mat, Mz, alfa, beta)
 
 
 if __name__ == "__main__":
     b = 6.0
-    Mat, Mz, alfa, beta = trace_shadow(M=1.0, MD=0.0, b=b, n=80, matrix_path="Mat_nu_disk0.0")
+    z0 = 0.0
+    hder = 10**-6
+
+    # Solve for the observer's initial rho outside trace_shadow (matching the
+    # sibling test_parallel_SHADOW.py driver). The lambda matrix must be loaded
+    # first since _solve_observer_rho -> gpp_i reads it.
+    general_methods.load_matrix("Mat_nu_disk0.0")
+    rho0 = _solve_observer_rho(1.0, 0.0, b, 0.0)
+
+    Mat, Mz, alfa, beta = trace_shadow(rho0, M=1.0, MD=0.0, b=b, n=80, matrix_path="Mat_nu_disk0.0")
 
     M2 = np.zeros((len(Mat), len(Mat[0])))
     Mat2 = np.zeros((len(alfa), len(beta)))
