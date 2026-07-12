@@ -18,7 +18,7 @@ __all__ = [
 # forceobj=True: this does file I/O (np.loadtxt), which numba cannot compile in
 # nopython mode; modern numba (>=0.59) no longer auto-falls back to object mode
 # for nopython=False, so object mode must be requested explicitly.
-@jit(forceobj=True)
+#@jit(forceobj=True)
 def load_matrix(path):
     """Load and return the pre-tabulated lambda-potential matrix (produced by
     generate_matriz.py). The returned array must be passed explicitly as the

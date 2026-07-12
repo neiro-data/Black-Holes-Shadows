@@ -402,7 +402,7 @@ alongside the plotting scripts.
 Made the Schwarzschild (Weyl-coordinate, `MD=0`) branch of the pipeline
 actually runnable end-to-end, fixing the environment/numba blockers flagged
 as out-of-scope in Interaction 4 and left as "Suggested next steps" above,
-and added a new orchestrator script, `test_run_1.py`.
+and added a new orchestrator script, `test_run_NAME.py`.
 
 ### Why this pipeline, and why now
 

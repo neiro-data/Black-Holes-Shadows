@@ -27,7 +27,7 @@ folded into the basis (see claude_interaction_steps.md, Interaction 3).
 
 The tracing driver is exposed as `trace_shadow(M, MD, b, n, matrix_path)`,
 returning `(Mat, Mz, alfa, beta)` for composition with other pipeline stages
-(e.g. test_run_1.py). `trace_shadow` is a plain-Python orchestrator split into
+(e.g. test_run_NAME.py). `trace_shadow` is a plain-Python orchestrator split into
 two helpers so numba's JIT actually covers the per-pixel work: the double loop
 over emission angles used to run in pure Python (dispatching into the jitted
 `func` once per pixel), so the loop itself -- array construction, `dr`/`dthe`
@@ -208,11 +208,12 @@ def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu, use_disk):
             y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j], Mat_nu), z0, dthe(rho0, z0, M, MD, b, alfa[i], Mat_nu)])
             (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, Mat_nu, use_disk)
 
+    
     return (Mat, Mz)
 
 
 @jit(nopython = True)
-def trace_shadow(rho0, M=1.0, MD=0.0, b=6.0, 
+def trace_shadow(Mat_nu, rho0, M=1.0, MD=0.0, b=6.0, 
                  z0=0.0, n=80, hder=10**-6, 
                  matrix_path="Mat_nu_disk0.0", use_disk=True):
     """Ray-trace a quarter-image shadow grid serially.
@@ -239,7 +240,7 @@ def trace_shadow(rho0, M=1.0, MD=0.0, b=6.0,
         (Mat, Mz, alfa, beta): the traced quarter-plane matrices and the
         emission-angle arrays used to build them.
     """
-    Mat_nu = general_methods.load_matrix(matrix_path)
+    #Mat_nu = general_methods.load_matrix(matrix_path)
 
     print(rho0)
 
@@ -249,10 +250,7 @@ def trace_shadow(rho0, M=1.0, MD=0.0, b=6.0,
     alfa = np.linspace(alfaa[0], alfaa[int(len(alfaa)/2) - 1], int(len(alfaa)/2))
     beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
 
-    #start = time.time()
     (Mat, Mz) = _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu, use_disk)
-
-    #print(f"For the trace_grid: {(time.time() - start):.2f}")
 
     return (Mat, Mz, alfa, beta)
 

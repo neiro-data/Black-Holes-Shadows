@@ -38,12 +38,14 @@ if REPO_ROOT not in sys.path:
 from generate_matriz import generate_lambda_matrix
 from test_Z_SHADOW import trace_shadow, _solve_observer_rho
 from symmetry import render_shadow
+from general_methods import *
 
 M = 1.0
 MD = 0.0
 b = 6.0
 z0 = 0.0
-N_POINTS = 10
+N_POINTS = 20
+hder = 10**-5
 USE_DISK = False  # pure Schwarzschild shadow, no disk-crossing classification
 
 # Anchor outputs to this script's folder so they land in generate_Schwarzschild_no_disk/
@@ -58,6 +60,8 @@ if __name__ == "__main__":
    os.makedirs(MATRIX_DIR, exist_ok=True)
    os.makedirs(OUT_DIR, exist_ok=True)
 
+   Mat_nu = load_matrix(MATRIX_PATH)
+
    start = time.time()
    print("Stage 1/3: tabulating lambda-potential matrix...")
    generate_lambda_matrix(M=M, MD=MD, b=b, n=200, out_path=MATRIX_PATH)
@@ -67,7 +71,10 @@ if __name__ == "__main__":
    start = time.time()
    rho0 = _solve_observer_rho(M, MD, b, z0)
    print("Stage 2/3: ray-tracing shadow quarter-grid...")
-   Mat, Mz, alfa, beta = trace_shadow(rho0 = rho0, M=M, MD=MD, b=b, z0 = z0, n=N_POINTS, matrix_path=MATRIX_PATH, use_disk=USE_DISK)
+
+   start = time.time()
+   Mat, Mz, alfa, beta = trace_shadow(Mat_nu = Mat_nu, rho0 = rho0, M=M, MD=MD, b=b, z0 = z0, n=N_POINTS, hder = hder, matrix_path=MATRIX_PATH, use_disk=USE_DISK)
+   print(f"Per point, the time taken was {((time.time() - start) / (len(alfa)*len(beta))):.4f}")
    np.savetxt(os.path.join(MATRIX_DIR, "Mat"), Mat)
    np.savetxt(os.path.join(MATRIX_DIR, "Mz"), Mz)
 
