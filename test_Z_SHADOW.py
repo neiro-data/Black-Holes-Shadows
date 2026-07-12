@@ -27,6 +27,15 @@ folded into the basis (see claude_interaction_steps.md, Interaction 3).
 
 The tracing driver is exposed as `trace_shadow(M, MD, b, n, matrix_path)`,
 returning `(Mat, Mz, alfa, beta)` for composition with other pipeline stages
+(e.g. test_run_1.py). `trace_shadow` is a plain-Python orchestrator split into
+two helpers so numba's JIT actually covers the per-pixel work: the double loop
+over emission angles used to run in pure Python (dispatching into the jitted
+`func` once per pixel), so the loop itself -- array construction, `dr`/`dthe`
+calls, control flow -- stayed uncompiled. `_trace_grid` now holds that loop
+under `@jit(nopython=True)` so numba compiles the whole thing, while
+`_solve_observer_rho` keeps the parts numba cannot compile in nopython mode
+(the `func_initial` `lambda` and the `scipy` `fsolve` observer-rho lookup) in
+plain Python. Running this file directly (`if __name__ == "__main__"`)
 (e.g. test_run_schwarzschild.py). Running this file directly (`if __name__ == "__main__"`)
 still calls `trace_shadow` with the original defaults, runs the same live
 disk-crossing classification, and shows the inline matplotlib figure. The
@@ -140,13 +149,73 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, use_disk=True):
 
 
 
+
+def _solve_observer_rho(M, MD, b, z0):
+    """Solve for the observer's initial rho on the z=z0 slice.
+
+    Isolates the part of the tracer that numba cannot compile in nopython
+    mode -- the `func_initial` `lambda` and the `scipy.optimize.fsolve` root
+    find -- so it stays in plain Python while the pixel loop can be JITed.
+    Finds rho such that the areal radius sqrt(gpp_i) equals the fixed
+    observer radius 15.0.
+
+    Args:
+        M, MD, b: BH mass, disk mass, disk radius parameters.
+        z0: the z-coordinate of the observer slice.
+
+    Returns:
+        rho0 (float): the observer's initial rho. `fsolve`'s (1,)-shaped
+        result is read out via `R_solution[0]` (see module docstring).
+    """
+    func_initial = lambda R: np.sqrt(gpp_i(R[0], z0, M, MD, b)) - 15.0
+
+    R_initial_guess = 10.0
+    R_solution = fsolve(func_initial, R_initial_guess)
+
+    return float(R_solution[0])
+
+
+@jit(nopython=True)
+def _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder):
+    """JIT-compiled hot loop: trace one geodesic per (alfa, beta) pixel.
+
+    This is the pure numerical work extracted from `trace_shadow` so numba
+    compiles the whole loop rather than just the per-pixel `func` call -- all
+    callees (`func`, `geo`, `run_kut4_mod`, `dr`, `dthe`) are already `@jit`ed,
+    so this runs in nopython mode.
+
+    Args:
+        rho0, z0: observer's initial rho (from `_solve_observer_rho`) and z.
+        M, MD, b: BH mass, disk mass, disk radius parameters.
+        alfa, beta: the (already quadrant-halved) emission-angle arrays.
+        hder: finite-difference step forwarded to the geodesic RHS.
+
+    Returns:
+        (Mat, Mz): the traced quarter-plane final rho/z matrices.
+    """
+    Mat = np.zeros((len(alfa), len(beta)))
+    Mz = np.zeros((len(alfa), len(beta)))
+
+    for i in range(len(alfa)):
+        for j in range(len(beta)):
+
+            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
+            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
+
+    return (Mat, Mz)
+
+
+def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0"):
 @jit(nopython = True)
 def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_disk=True):
     """Ray-trace a quarter-image shadow grid serially.
 
-    Loads the pre-tabulated lambda matrix, solves for the initial observer's
-    rho, builds an n x n emission-angle grid (halved to one quadrant, i.e.
-    the returned arrays are n/2 x n/2), and traces one geodesic per pixel.
+    Plain-Python orchestrator: loads the pre-tabulated lambda matrix, solves
+    for the initial observer's rho (`_solve_observer_rho`), builds an n x n
+    emission-angle grid (halved to one quadrant, i.e. the returned arrays are
+    n/2 x n/2), and delegates the per-pixel geodesic tracing to the JIT-compiled
+    `_trace_grid` so the whole pixel loop compiles instead of running in pure
+    Python.
 
     Args:
         M, MD, b: BH mass, disk mass, disk radius parameters.
@@ -165,12 +234,8 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_d
     start = time.time()
     z0 = 0.0
     hder = 10**-6
-    func_initial = lambda R: np.sqrt(gpp_i(R[0], z0, M, MD, b)) - 15.0
 
-    R_initial_guess = 10.0
-    R_solution = fsolve(func_initial, R_initial_guess)
-
-    rho0 = float(R_solution[0])
+    rho0 = _solve_observer_rho(M, MD, b, z0)
     print(rho0)
 
     alfaa = np.linspace(-np.arctan(10/15), np.arctan(10/15), n)
@@ -179,6 +244,7 @@ def trace_shadow(M=1.0, MD=0.0, b=6.0, n=80, matrix_path="Mat_nu_disk0.0", use_d
     alfa = np.linspace(alfaa[0], alfaa[int(len(alfaa)/2) - 1], int(len(alfaa)/2))
     beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
 
+    (Mat, Mz) = _trace_grid(rho0, z0, M, MD, b, alfa, beta, hder)
     Mat = np.zeros((len(alfa), len(beta)))
     Mz = np.zeros((len(alfa), len(beta)))
 

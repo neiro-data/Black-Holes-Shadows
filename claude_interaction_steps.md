@@ -495,6 +495,43 @@ silently fix them" convention (see Interaction 3, `classify_shadow`'s
 
 ## Interaction 9
 
+Branch: `numba-optimization` (created from `main`).
+
+### Problem
+
+In `test_Z_SHADOW.py`, numba never covered the per-pixel work of
+`trace_shadow`. The function is plain Python and its double loop over emission
+angles ran in the interpreter, merely dispatching into the jitted `func` once
+per pixel -- so the loop itself (array construction, `dr`/`dthe` calls, control
+flow) stayed uncompiled. The setup also mixes in things numba cannot compile in
+nopython mode: the `func_initial` `lambda`, the `scipy.optimize.fsolve`
+observer-rho lookup, `general_methods.load_matrix`, and `time`/`print`.
+
+### Steps taken
+
+1. Split `trace_shadow` into three functions:
+   - `_solve_observer_rho(M, MD, b, z0)` -- plain Python; isolates the
+     numba-incompatible `lambda` + `fsolve` root find, returns `rho0`.
+   - `_trace_grid(rho0, z0, M, MD, b, alfa, beta, hder)` --
+     `@jit(nopython=True)`; the extracted pixel loop that builds each photon's
+     initial state (`dr`/`dthe`) and calls the jitted `func`, populating and
+     returning `(Mat, Mz)`. This is the only new jitted piece and lets numba
+     compile the whole loop instead of just the per-call `func`.
+   - `trace_shadow(...)` -- unchanged signature and `(Mat, Mz, alfa, beta)`
+     return; loads the matrix, times, builds the angle grids, calls the two
+     helpers, prints.
+2. Updated the module docstring to document the split and the JIT-coverage
+   motivation.
+
+### Verification
+
+- Structural: `trace_shadow` and `_solve_observer_rho` are plain Python;
+  `_trace_grid` is a numba Dispatcher.
+- End-to-end smoke test: generated a coarse lambda matrix (`n=120`) and ran
+  `trace_shadow(n=20)` -- printed `rho0`≈13.96 and elapsed time, returned finite
+  `(10, 10)` `Mat`/`Mz` with 22 captured shadow pixels (unchanged from the
+  pre-split loop, which was copied verbatim). Crucially `_trace_grid.signatures`
+  had 1 entry afterwards, confirming numba compiled the loop.
 Added a `use_disk` toggle so the Schwarzschild (`MD=0`) pipeline can render a
 *pure* black-hole shadow — a solid dark disk with no surrounding ring —
 directly addressing the cosmetic banding/ring artifact flagged as a known
