@@ -48,11 +48,16 @@ Canonicalization notes (see claude_interaction_steps.md, Interaction 4):
   are plain nopython. Real *effective* parallelism (prange over the pixel
   grid) still lives only in test_parallel_SHADOW.py's own `f_paral`.
 
-`lamb`'s Mat_nu dependency (provisional): `lamb` bilinearly interpolates a
-pre-tabulated lambda matrix held in `mathematical_formulas.Mat_nu`. Call
-`load_matrix(path)` once at script startup (before any `lamb` call) to set it.
-This mirrors the previous per-script `Mat_nu = np.loadtxt(...)` pattern; a
-more explicit (parameter-threaded) design is a possible follow-up.
+`lamb`'s Mat_nu dependency (parameter-threaded): `lamb` bilinearly interpolates
+a pre-tabulated lambda matrix that is passed in explicitly as its trailing
+`Mat_nu` argument. `load_matrix(path)` loads and *returns* that matrix; callers
+thread it through the functions that (transitively) need it -- `lamb`, `grr`,
+`gzz`, `dr`, `dthe`, and each script's `geo`/`func`/driver (it reaches `geo`
+through `run_kut4_mod`'s `*args`). There is no module-level `Mat_nu` global:
+numba freezes globals as compile-time constants in nopython mode, so a
+reloadable global could not work (and raised "Mat_nu cannot be loaded as a
+global variable"). This replaces the earlier provisional `load_matrix`-sets-a-
+global design.
 """
 
 from .mathematical_formulas import *  # noqa: F401,F403

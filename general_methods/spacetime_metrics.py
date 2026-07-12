@@ -39,15 +39,15 @@ def gtt(rho, z, M, MD, b):
 
 
 @jit(nopython=True)
-def grr(rho, z, M, MD, b):
+def grr(rho, z, M, MD, b, Mat_nu):
     """g_rho,rho metric component at (rho, z)."""
-    return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
+    return math.exp(lamb(rho, z, M, MD, b, 2, Mat_nu) - nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
-def gzz(rho, z, M, MD, b):
+def gzz(rho, z, M, MD, b, Mat_nu):
     """g_zz metric component at (rho, z)."""
-    return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
+    return math.exp(lamb(rho, z, M, MD, b, 2, Mat_nu) - nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
@@ -77,15 +77,15 @@ def zeta(rho, z, M, MD, b):
 
 # Momenta & initial velocities, from photon emission angles (alfa, beta)
 @jit(nopython=True)
-def dthe(rho, z, M, MD, b, alfa):
+def dthe(rho, z, M, MD, b, alfa, Mat_nu):
     """Initial d(z)/d(affine parameter)-like "theta" velocity component from emission angle alfa."""
-    return 1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alfa)
+    return 1 / np.sqrt(gzz(rho, z, M, MD, b, Mat_nu)) * np.sin(alfa)
 
 
 @jit(nopython=True)
-def dr(rho, z, M, MD, b, alfa, beta):
+def dr(rho, z, M, MD, b, alfa, beta, Mat_nu):
     """Initial drho/d(affine parameter) velocity component from emission angles alfa, beta."""
-    return 1 / np.sqrt(grr(rho, z, M, MD, b)) * np.cos(alfa) * np.cos(beta)
+    return 1 / np.sqrt(grr(rho, z, M, MD, b, Mat_nu)) * np.cos(alfa) * np.cos(beta)
 
 
 @jit(nopython=True)
@@ -114,27 +114,29 @@ def dt(rho, z, M, MD, b, alfa, beta, p_t):
 
 class Metric:
     """Object-oriented convenience wrapper around the module-level metric
-    functions above. Bound to fixed (M, MD, b) black-hole/disk parameters;
-    methods take just (rho, z, ...) and delegate to the free jitted functions.
+    functions above. Bound to fixed (M, MD, b) black-hole/disk parameters and
+    the lambda matrix `Mat_nu` (from `load_matrix`); methods take just
+    (rho, z, ...) and delegate to the free jitted functions.
 
     This class is not used by the numba-jitted `geo`/`func` code in the
     consumer ray-tracer scripts (see module docstring) -- it's a plain-Python
     interface for exploratory/analysis code.
     """
 
-    def __init__(self, M, MD, b):
+    def __init__(self, M, MD, b, Mat_nu):
         self.M = M
         self.MD = MD
         self.b = b
+        self.Mat_nu = Mat_nu
 
     def gtt(self, rho, z):
         return gtt(rho, z, self.M, self.MD, self.b)
 
     def grr(self, rho, z):
-        return grr(rho, z, self.M, self.MD, self.b)
+        return grr(rho, z, self.M, self.MD, self.b, self.Mat_nu)
 
     def gzz(self, rho, z):
-        return gzz(rho, z, self.M, self.MD, self.b)
+        return gzz(rho, z, self.M, self.MD, self.b, self.Mat_nu)
 
     def gpp(self, rho, z):
         return gpp(rho, z, self.M, self.MD, self.b)
@@ -152,20 +154,22 @@ class Metric:
 class MetricDerivatives:
     """Object-oriented convenience wrapper around the initial-velocity/momentum
     rate functions above (dthe, dr, dphi, dt). Bound to fixed (M, MD, b)
-    black-hole/disk parameters; see `Metric` docstring for the same caveat
-    about numba jit compatibility.
+    black-hole/disk parameters and the lambda matrix `Mat_nu` (from
+    `load_matrix`, used by dthe/dr via gzz/grr); see `Metric` docstring for the
+    same caveat about numba jit compatibility.
     """
 
-    def __init__(self, M, MD, b):
+    def __init__(self, M, MD, b, Mat_nu):
         self.M = M
         self.MD = MD
         self.b = b
+        self.Mat_nu = Mat_nu
 
     def dthe(self, rho, z, alfa):
-        return dthe(rho, z, self.M, self.MD, self.b, alfa)
+        return dthe(rho, z, self.M, self.MD, self.b, alfa, self.Mat_nu)
 
     def dr(self, rho, z, alfa, beta):
-        return dr(rho, z, self.M, self.MD, self.b, alfa, beta)
+        return dr(rho, z, self.M, self.MD, self.b, alfa, beta, self.Mat_nu)
 
     def dphi(self, rho, z, alfa, beta, p_phi):
         return dphi(rho, z, self.M, self.MD, self.b, alfa, beta, p_phi)

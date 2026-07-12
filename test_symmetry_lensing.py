@@ -49,7 +49,7 @@ from general_methods import *
 
 # Geodesic & ray tracing
 @jit(nopython=True)
-def geo(t,z,M,alfa,beta,rho0,z0,MD,b,hder):
+def geo(t,z,M,alfa,beta,rho0,z0,MD,b,hder,Mat_nu):
     """Geodesic equations of motion (right-hand side), via the Weyl nu/lambda potentials and their derivatives.
 
     Args:
@@ -61,6 +61,7 @@ def geo(t,z,M,alfa,beta,rho0,z0,MD,b,hder):
         rho0, z0: initial emission point (kept fixed since pphi, pt are
             constants of motion).
         hder: finite-difference step used inside derNU.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), passed to `lamb`.
 
     Returns:
         np.array([drho, d2rho, dz, d2z, dphi]) -- the derivative of the
@@ -71,9 +72,9 @@ def geo(t,z,M,alfa,beta,rho0,z0,MD,b,hder):
     pphi = Pphi(rho0,z0,M,MD,b,alfa,beta)
     pt = Pt(rho0,z0,M,MD,b,alfa,beta)
 
-    d2Rdt = -(0.5*math.exp(2*nu(z[0],z[2],M,MD,b,2)-lamb(z[0],z[2],M,MD,b,2))*derNU(z[0],z[2],M,MD,b,0,2,hder)* dt(z[0],z[2],M,MD,b,alfa,beta,pt)**2              +0.5*(dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[1]**2 +               (dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[1]*z[3]              -0.5*(dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[3]**2              +0.5*math.exp(-lamb(z[0],z[2],M,MD,b,2))*z[0]*(-2+z[0]*derNU(z[0],z[2],M,MD,b,0,2,hder))*dphi(z[0],z[2],M,MD,b,alfa,beta,pphi)**2)
+    d2Rdt = -(0.5*math.exp(2*nu(z[0],z[2],M,MD,b,2)-lamb(z[0],z[2],M,MD,b,2,Mat_nu))*derNU(z[0],z[2],M,MD,b,0,2,hder)* dt(z[0],z[2],M,MD,b,alfa,beta,pt)**2              +0.5*(dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[1]**2 +               (dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[1]*z[3]              -0.5*(dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[3]**2              +0.5*math.exp(-lamb(z[0],z[2],M,MD,b,2,Mat_nu))*z[0]*(-2+z[0]*derNU(z[0],z[2],M,MD,b,0,2,hder))*dphi(z[0],z[2],M,MD,b,alfa,beta,pphi)**2)
 
-    d2Thedt = -(0.5*math.exp(2*nu(z[0],z[2],M,MD,b,2)-lamb(z[0],z[2],M,MD,b,2))*derNU(z[0],z[2],M,MD,b,1,2,hder)* dt(z[0],z[2],M,MD,b,alfa,beta,pt)**2                -0.5*(dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[1]**2                + (dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[1]*z[3]                + 0.5*(dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[3]**2                + 0.5*math.exp(-lamb(z[0],z[2],M,MD,b,2))*z[0]**2*derNU(z[0],z[2],M,MD,b,1,2,hder)*dphi(z[0],z[2],M,MD,b,alfa,beta,pphi)**2)
+    d2Thedt = -(0.5*math.exp(2*nu(z[0],z[2],M,MD,b,2)-lamb(z[0],z[2],M,MD,b,2,Mat_nu))*derNU(z[0],z[2],M,MD,b,1,2,hder)* dt(z[0],z[2],M,MD,b,alfa,beta,pt)**2                -0.5*(dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[1]**2                + (dlamb2(z[0],z[2],M,MD,b,0,2,hder)-derNU(z[0],z[2],M,MD,b,0,2,hder))*z[1]*z[3]                + 0.5*(dlamb2(z[0],z[2],M,MD,b,1,2,hder)-derNU(z[0],z[2],M,MD,b,1,2,hder))*z[3]**2                + 0.5*math.exp(-lamb(z[0],z[2],M,MD,b,2,Mat_nu))*z[0]**2*derNU(z[0],z[2],M,MD,b,1,2,hder)*dphi(z[0],z[2],M,MD,b,alfa,beta,pphi)**2)
 
     dPhidt = 1/gpp(z[0], z[2],M,MD,b)*pphi
 
@@ -86,7 +87,7 @@ def geo(t,z,M,alfa,beta,rho0,z0,MD,b,hder):
 
 
 @jit(nopython=True)
-def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
+def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder,Mat_nu):
     """Single-ray tracer: integrates one photon's geodesic until it escapes, is captured, or exits otherwise.
 
     Repeatedly advances the state with `run_kut4_mod` while the photon's nu
@@ -100,6 +101,8 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
         alfa, beta: emission angles.
         M, rho0, z0, MD, b, hder: BH mass, initial emission point, disk
             mass, disk radius, finite-difference step.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), forwarded
+            to `geo` via `run_kut4_mod`.
 
     Returns:
         [rho, z, phi] at the escape point (areal radius >= 30), or the
@@ -109,7 +112,7 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
     Y=[]
     Y.append(y)
     while (nu(y[0],y[2],M,MD,b,2) > -3.0 and np.sqrt(gpp(np.sqrt(y[0]**2+y[2]**2),0,M,MD,b)) < 30.0):
-        (h,x,y) = run_kut4_mod(geo, x, y, h,M,alfa,beta,rho0,z0,MD,b,hder)
+        (h,x,y) = run_kut4_mod(geo, x, y, h,M,alfa,beta,rho0,z0,MD,b,hder,Mat_nu)
         Y.append(y)
 
         if np.sqrt(gpp(np.sqrt(y[0]**2+y[2]**2),0,M,MD,b)) >= 30.0:
@@ -134,7 +137,7 @@ def func(y,x,h,alfa,beta,M,rho0,z0,MD,b,hder):
 # exploitation: the full lensing image can be reconstructed from one
 # quadrant by reflection), ray-trace that quadrant with `func`, and save
 # the resulting Mat/Mz/Mphi matrices.
-general_methods.load_matrix("Mat_nu_disk0.1")
+Mat_nu = general_methods.load_matrix("Mat_nu_disk0.1")
 
 start = time.time()
 M = 0.9
@@ -166,8 +169,8 @@ for i in range(len(alfa)):
     for j in range(len(beta)):
 
 
-        y = np.array([rho0,dr(rho0,z0,M,MD,b,alfa[i],beta[j]), z0,dthe(rho0,z0,M,MD,b,alfa[i]),0])
-        (Mat[i,j],Mz[i,j],Mphi[i,j]) = func(y,300.0,-0.02,alfa[i],beta[j],M,rho0,z0,MD,b,hder)
+        y = np.array([rho0,dr(rho0,z0,M,MD,b,alfa[i],beta[j],Mat_nu), z0,dthe(rho0,z0,M,MD,b,alfa[i],Mat_nu),0])
+        (Mat[i,j],Mz[i,j],Mphi[i,j]) = func(y,300.0,-0.02,alfa[i],beta[j],M,rho0,z0,MD,b,hder,Mat_nu)
 
 
 end = time.time()

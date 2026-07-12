@@ -35,7 +35,7 @@ from general_methods import *
 
 
 @jit(nopython=True, parallel=True)
-def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
+def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder, Mat_nu):
     """Geodesic equations of motion (right-hand side), via the Weyl nu/lambda potentials and their derivatives.
 
     Args:
@@ -47,6 +47,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
         rho0, z0: initial emission point (kept fixed since pphi, pt are
             constants of motion).
         hder: finite-difference step used inside derNU.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), passed to `lamb`.
 
     Returns:
         np.array([drho, d2rho, dz, d2z]) -- the derivative of the state
@@ -56,9 +57,9 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     pphi = Pphi(rho0, z0, M, MD, b, alfa, beta)
     pt = Pt(rho0, z0, M, MD, b, alfa, beta)
 
-    d2Rdt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))*derNU(z[0], z[2], M, MD, b, 0, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 + 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]*z[3] - 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2))*z[0]*(-2 + z[0]*derNU(z[0], z[2], M, MD, b, 0, 2, hder))*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
+    d2Rdt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*derNU(z[0], z[2], M, MD, b, 0, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 + 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]*z[3] - 0.5*(dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*z[0]*(-2 + z[0]*derNU(z[0], z[2], M, MD, b, 0, 2, hder))*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
 
-    d2Thedt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))*derNU(z[0], z[2], M, MD, b, 1, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 - 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]*z[3] + 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2))*z[0]**2*derNU(z[0], z[2], M, MD, b, 1, 2, hder)*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
+    d2Thedt = -(0.5*math.exp(2*nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*derNU(z[0], z[2], M, MD, b, 1, 2, hder) * dt(z[0], z[2], M, MD, b, alfa, beta, pt)**2 - 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[1]**2 + (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))*z[1]*z[3] + 0.5*(dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))*z[3]**2 + 0.5*math.exp(-lamb(z[0], z[2], M, MD, b, 2, Mat_nu))*z[0]**2*derNU(z[0], z[2], M, MD, b, 1, 2, hder)*dphi(z[0], z[2], M, MD, b, alfa, beta, pphi)**2)
 
 
 
@@ -67,7 +68,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True, parallel=True)
-def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
+def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, Mat_nu):
     """Single-ray tracer: integrates one photon's geodesic until it escapes, is captured, or exits otherwise.
 
     Repeatedly advances the state with `run_kut4_mod` while the photon's nu
@@ -81,6 +82,8 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
         alfa, beta: emission angles.
         M, rho0, z0, MD, b, hder: BH mass, initial emission point, disk
             mass, disk radius, finite-difference step.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), forwarded
+            to `geo` via `run_kut4_mod`.
 
     Returns:
         [rho, z] at the escape point (areal radius >= 30), or the sentinel
@@ -97,7 +100,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
     while (nu(y[0], y[2], M, MD, b, 2) > -3.0 and np.sqrt(gpp(np.sqrt(y[0]**2 + y[2]**2), 0, M, MD, b)) < 30.0):
 
-        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
+        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder, Mat_nu)
 
         Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
 
@@ -115,7 +118,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True, parallel=True)
-def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
+def f_paral(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu):
     """Parallel (numba prange) shadow-grid driver: ray-traces every (alfa, beta) pixel and fills Mat/Mz.
 
     The outer loops over alfa and beta use `prange` so numba distributes
@@ -127,6 +130,8 @@ def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
         M, MD, b: BH mass, disk mass, disk radius.
         alfa, beta: 1-D arrays of emission angles spanning the image grid.
         hder: finite-difference step forwarded to func/geo.
+        Mat_nu: pre-tabulated lambda matrix (from `load_matrix`), forwarded to
+            dr/dthe/func.
 
     Returns:
         (Mat, Mz): 2-D arrays of the final rho, z for each (alfa, beta) pixel.
@@ -136,8 +141,8 @@ def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
 
     for i in prange(len(alfa)):
         for j in prange(len(beta)):
-            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j]), z0, dthe(rho0, z0, M, MD, b, alfa[i])])
-            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder)
+            y = np.array([rho0, dr(rho0, z0, M, MD, b, alfa[i], beta[j], Mat_nu), z0, dthe(rho0, z0, M, MD, b, alfa[i], Mat_nu)])
+            (Mat[i, j], Mz[i, j]) = func(y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, Mat_nu)
 
     return (Mat, Mz)
 
@@ -145,7 +150,7 @@ def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
 # Driver: solve for the initial observer's rho, build the emission-angle
 # grid (only the first quadrant, alfaa/betaa halved), ray-trace it in
 # parallel via f_paral, and save the resulting Mat/Mz matrices.
-general_methods.load_matrix("Mat_nu_disk0.1")
+Mat_nu = general_methods.load_matrix("Mat_nu_disk0.1")
 
 M = 0.9
 MD = 0.1
@@ -168,7 +173,7 @@ beta = np.linspace(betaa[0], betaa[int(len(betaa)/2) - 1], int(len(betaa)/2))
 
 start1 = time.time()
 start = time.time()
-(Mat, Mz) = f_paral(rho0, z0, M, MD, b, alfa, beta, hder)
+(Mat, Mz) = f_paral(rho0, z0, M, MD, b, alfa, beta, hder, Mat_nu)
 end = time.time()
 print(end - start)
 
