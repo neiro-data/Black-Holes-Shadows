@@ -1,0 +1,32 @@
+[project]
+name = "black-holes-shadows-one-shot-effort-medium-low"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numba>=0.66.0",
+    "numpy>=2.4.6",
+    "scipy>=1.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "S", "B"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# Single-letter names (l, I) mirror the physics/numerics convention (l = derivative
+# axis selector, I = bilinear-interpolation weight) from the legacy implementation.
+"weyl_core.py" = ["E741"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.22",
+]
