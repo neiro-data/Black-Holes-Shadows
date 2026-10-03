@@ -17,7 +17,8 @@ uv run python generate_matriz.py
 ```
 
 This is the base step of the Weyl family. It must run before any Weyl tracer. It tabulates the
-lambda potential on a 1200 by 1200 grid and writes the grid with `np.savetxt`.
+lambda potential on a 1200 by 1200 grid and writes the grid with `np.savez_compressed`
+(`matrices/lambda_*.npz`, key `lam`).
 
 The file name and the parameters are set at the top of `__main__`. The current values are
 `M = 0.9`, `MD = 0.1`, `b = 3.0`, and the output name `Mat_constA_Mbh_0.9`.
@@ -115,3 +116,22 @@ uv run ruff check .    # lint
 ```
 
 The repository has no test suite and no type checker.
+
+## Config-driven runner
+
+```bash
+uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 16
+```
+
+- **Progress:** a `tqdm` bar shows rows done, elapsed time and ETA on stderr. Use `--no-progress`
+  to hide it. The parallel path calls the numba tracer in row chunks, and the results are
+  identical to a single call.
+- **Cores:** the runner uses 80% of the system cores (at least 1) for numba. The count is stored
+  in `run.json` as `numba_threads`.
+- **Output folder:** `runs/<YYYYMMDD_HHMMSS>_<name>/` (local time). Each run gets its own folder.
+- **Files:** `config.resolved.toml`, `run.json`, `status.txt`, `coord1.txt`, `coord2.txt`,
+  `phi.txt` (Kerr), `image.png`.
+- **`run.json`:** `run_id`, `timestamp`, `timestamp_iso`, `name`, `config_path`, `backend`, `M`,
+  `a`, `MD`, `b`, `distance`, `theta0`, `n`, `half_angle`, `disk_visible`, `parallel`,
+  `matrix_source`, `n_grid`, `palette`, `elapsed_s`, `shadow_pixels`, `numba_threads`,
+  `versions`, `status`.

@@ -3,8 +3,10 @@
 The on-disk data of this repository: the lambda lookup matrix and the ray-tracing matrices.
 Referenced from [README.md](README.md).
 
-Every file is a plain-text matrix. `np.savetxt` writes it. `weyl_core.load_matrix` reads the
-lookup matrix, and `np.loadtxt` reads the rest. No database and no binary format is used.
+The lambda lookup matrix is a compressed NumPy archive (`matrices/lambda_M*_MD*_b*_n*.npz`, key
+`lam`). `np.savez_compressed` writes it, and `weyl_core.load_matrix` reads it. `load_matrix` still
+reads plain-text tables for the older scripts. The ray-tracing matrices are plain text:
+`np.savetxt` writes them and `np.loadtxt` reads them.
 
 ## Pipeline
 

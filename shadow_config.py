@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
 RUNS_DIR = Path("runs")
+_STAMP_RE = re.compile(r"\d{8}_\d{6}")
+
+
+def _now_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 @dataclass(frozen=True)
@@ -35,8 +42,12 @@ class ShadowConfig:
     palette: str = "grey_black_white"
     save: bool = True
     show: bool = False
+    # run identity (local time; not read from / written to TOML)
+    timestamp: str = field(default_factory=_now_stamp)
 
     def __post_init__(self) -> None:
+        if not _STAMP_RE.fullmatch(self.timestamp):
+            raise ValueError(f"timestamp must be YYYYMMDD_HHMMSS, got {self.timestamp!r}")
         if not 0 <= self.a < 1:
             raise ValueError(f"a must satisfy 0 <= a < 1, got {self.a}")
         if self.MD < 0:
@@ -88,8 +99,37 @@ class ShadowConfig:
         return self.name or f"{self.backend}_M{self.M}_a{self.a}_MD{self.MD}_b{self.b}_n{self.n}"
 
     @property
+    def run_id(self) -> str:
+        return f"{self.timestamp}_{self.run_name}"
+
+    @property
     def run_dir(self) -> Path:
-        return RUNS_DIR / self.run_name
+        return RUNS_DIR / self.run_id
+
+    def to_metadata(self) -> dict:
+        """Run parameters for run.json (runtime stats are added by the runner)."""
+        started = datetime.strptime(self.timestamp, "%Y%m%d_%H%M%S").astimezone()
+        weyl = self.backend == "weyl"
+        return {
+            "run_id": self.run_id,
+            "timestamp": self.timestamp,
+            "timestamp_iso": started.isoformat(),
+            "name": self.run_name,
+            "backend": self.backend,
+            "M": self.M,
+            "a": self.a,
+            "MD": self.MD,
+            "b": self.b,
+            "distance": self.distance,
+            "theta0": self.theta0,
+            "n": self.n,
+            "half_angle": self.half_angle,
+            "disk_visible": self.disk_visible,
+            "parallel": self.parallel,
+            "matrix_source": self.matrix_source if weyl else None,
+            "n_grid": self.n_grid if weyl else None,
+            "palette": self.palette,
+        }
 
     @classmethod
     def from_toml(cls, path: str | Path, overrides: dict | None = None) -> ShadowConfig:
