@@ -40,7 +40,8 @@ uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64
 scripts/run_cases.sh                     # all shipped configs, one process each
 ```
 
-Output goes to `runs/<name>/`. The Weyl tracer is slow (about 8 minutes at n = 64).
+Output goes to `runs/<YYYYMMDD_HHMMSS>_<name>/`, with a `run.json` that records the parameters.
+A progress bar shows on stderr. Use `--no-progress` to hide it. The Weyl tracer is slow (about 8 minutes at n = 64).
 
 The Kerr driver needs no matrix.
 

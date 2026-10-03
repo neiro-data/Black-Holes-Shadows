@@ -1,5 +1,8 @@
 """Tiny-grid end-to-end checks. One numba compile per interpreter; Mat_nu is set once."""
 
+import json
+import re
+
 import numpy as np
 import pytest
 
@@ -26,11 +29,25 @@ def test_shipped_configs_smoke(cfg_file):
         ov["disk_visible_opt"] = True
     cfg = sc.ShadowConfig.from_toml(f"configs/{cfg_file}.toml", ov)
     out = rs.trace_grid(cfg)
-    rs.save_run(cfg, out)
+    rs.save_run(cfg, out, elapsed_s=1.0, config_path=f"configs/{cfg_file}.toml")
+    assert re.match(r"^\d{8}_\d{6}_", cfg.run_dir.name)
+    meta = json.loads((cfg.run_dir / "run.json").read_text())
+    assert meta["timestamp"] == cfg.timestamp
+    assert meta["n"] == 8
+    assert {"a", "M", "name", "run_id"} <= meta.keys()
     assert out["status"].shape == (8, 8)
     assert not (out["status"] == 3).any()
     assert (cfg.run_dir / "image.png").exists()
     assert (cfg.run_dir / "config.resolved.toml").exists()
+
+
+def test_chunked_parallel_matches_single_call():
+    cfg = sc.ShadowConfig.from_toml("configs/kerr_a0.9_nodisk.toml", {"n": 8, "parallel": True})
+    one = rs.trace_grid(cfg, progress=False, chunk=1)
+    whole = rs.trace_grid(cfg, progress=False, chunk=cfg.n)
+    assert one.keys() == whole.keys()
+    for k in one:
+        assert np.array_equal(one[k], whole[k], equal_nan=True)
 
 
 def test_func_disk_off_matches_wrapper_on_nodisk_rays():

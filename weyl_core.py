@@ -60,13 +60,18 @@ Mat_nu = np.zeros((4, 4))
 
 
 def load_matrix(path: str) -> None:
-    """Load the tabulated lambda-potential matrix produced by generate_matriz.py.
+    """Load the tabulated lambda-potential matrix produced by generate_matriz.py (`.npz`, key
+    `lam`; any other suffix is read as legacy plain text).
 
     Must be called before the first ray trace: numba freezes the `Mat_nu` global the
     first time a `@jit(nopython=True)` function referencing it is compiled.
     """
     global Mat_nu
-    Mat_nu = np.loadtxt(path)
+    if str(path).endswith(".npz"):
+        with np.load(path) as f:
+            Mat_nu = f["lam"]
+    else:  # legacy plain-text tables
+        Mat_nu = np.loadtxt(path)
 
 
 # ---------------------------------------------------------------------------

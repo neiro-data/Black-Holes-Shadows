@@ -57,7 +57,7 @@ def build_lambda_matrix(
 
 
 def matrix_path(M: float, MD: float, b: float, n_grid: int) -> Path:
-    return MATRICES_DIR / f"lambda_M{M}_MD{MD}_b{b}_n{n_grid}.txt"
+    return MATRICES_DIR / f"lambda_M{M}_MD{MD}_b{b}_n{n_grid}.npz"
 
 
 def ensure_matrix(M: float, MD: float, b: float, n_grid: int, source: str = "auto") -> Path:
@@ -70,7 +70,7 @@ def ensure_matrix(M: float, MD: float, b: float, n_grid: int, source: str = "aut
             raise ValueError(f"{path} does not match the requested parameters {params}")
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savetxt(path, build_lambda_matrix(M, MD, b, n_grid, source))
+    np.savez_compressed(path, lam=build_lambda_matrix(M, MD, b, n_grid, source))
     sidecar.write_text(json.dumps(params))
     return path
 

@@ -45,3 +45,11 @@ def test_matrix_sidecar_mismatch(tmp_path, monkeypatch):
     path.with_suffix(".json").write_text(json.dumps({"M": 2.0}))
     with pytest.raises(ValueError):
         gm.ensure_matrix(1.0, 0.0, 6.0, 20)
+
+
+def test_timestamp_validation_and_run_dir(tmp_path):
+    cfg_file = write_cfg(tmp_path, 'name = "x"\n')
+    with pytest.raises(ValueError):
+        ShadowConfig.from_toml(cfg_file, {"timestamp": "bad"})
+    cfg = ShadowConfig.from_toml(cfg_file, {"timestamp": "20260101_000000"})
+    assert cfg.run_dir.name == "20260101_000000_x"

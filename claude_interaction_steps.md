@@ -106,3 +106,11 @@ numerical behaviour.
 - Checks: 13 pytest pass; ruff clean; Weyl vs Kerr at a=0, MD=0, n=64 gave identical masks (968 px).
 - Not done: Plan validation 2–4, case 2 end to end at full matrix size, Kerr overlay. Weyl trace ~452 s at n=64.
 - Test outputs in `runs/` and `matrices/` were deleted afterwards; both are now gitignored.
+
+## Run progress, timestamped run IDs, 80% cores, npz matrices — branch feat/run-progress-npz-matrices
+- Resumed from `plan-run-progress-tracking.md` inline (no sub-agents; origin-session handoff, pipeline prompt skipped).
+- `run_shadow.py`: tqdm progress (parallel path runs `f_paral` in row chunks, serial path wraps the loop), `--no-progress`, `run.json` (params, `elapsed_s`, versions, threads), numba threads capped at 80% of cores.
+- `shadow_config.py`: `timestamp` field, `run_id`, runs land in `runs/<YYYYMMDD_HHMMSS>_<name>/`.
+- `generate_matriz.py` / `weyl_core.load_matrix`: lambda table saved as compressed `.npz` (key `lam`); 37.4 MB -> 10.8 MB, load 0.23 s -> 0.04 s; `.txt` still readable. Parquet rejected (columnar, extra dep).
+- Added `tqdm` dep; tests for layout/metadata, chunk parity, timestamp validation; docs updated. 15 pytest pass; ruff clean.
+- Asked and dropped: extra `time_spent` field (`elapsed_s` already covers it). Run outputs (status/coord txt) left as text.
