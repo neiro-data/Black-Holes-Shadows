@@ -1,0 +1,16 @@
+name = "schwarzschild_nodisk"
+
+[spacetime]
+M  = 1.0
+a  = 0.0
+MD = 0.0
+b  = 6.0
+
+[observer]
+distance = 15.0
+
+[grid]
+n = 160
+
+[plot]
+palette = "grey_black_white"

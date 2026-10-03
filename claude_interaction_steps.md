@@ -97,3 +97,12 @@ numerical behaviour.
 - `weyl_core.nu_i` intentionally calls the jitted `nuD` (not the observer-frame
   `nuD_i`) in the `m == 1` branch — this mirrors the original legacy code exactly
   and was preserved rather than "fixed," per the conservative-refactor instructions.
+
+## Config-driven runner (Schwarzschild ± disk, Kerr no disk) — branch feat/config-runner-schwarzschild-kerr
+- Implemented Plan 1 inline (no sub-agents; handoff session, pipeline prompt skipped).
+- `weyl_core`: `func(..., disk_visible)` + `func_bh_disk_crossing` wrapper; `f_paral` takes the flag; fixed NumPy 2 crash in `solve_observer_rho`.
+- `kerr_core`: `func_status`, parallel `f_paral`, horizon test gets the `M` factor.
+- New: `shadow_config.py`, `run_shadow.py`, `configs/*.toml`, `scripts/run_cases.sh`, `tests/`; `generate_matriz.py` now caches by content (sidecar JSON, analytic fast path for MD=0).
+- Checks: 13 pytest pass; ruff clean; Weyl vs Kerr at a=0, MD=0, n=64 gave identical masks (968 px).
+- Not done: Plan validation 2–4, case 2 end to end at full matrix size, Kerr overlay. Weyl trace ~452 s at n=64.
+- Test outputs in `runs/` and `matrices/` were deleted afterwards; both are now gitignored.

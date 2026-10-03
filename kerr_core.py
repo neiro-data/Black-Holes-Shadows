@@ -7,7 +7,7 @@ M, i.e. the physical spin is `a*M`). Originally embedded directly in
 """
 
 import numpy as np
-from numba import jit
+from numba import jit, prange
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +480,7 @@ def func(y, x, h, alfa, beta, a, M, r0, theta0):
     """
     Y = [y]
     yf = [Y[-1][0], Y[-1][2], Y[-1][4]]
-    while y[0] > 1.01 * (1 + np.sqrt(1 - a**2)):
+    while y[0] > 1.01 * M * (1 + np.sqrt(1 - a**2)):
         (h, x, y) = run_kut4_mod(geo, x, y, h, a, M, alfa, beta, r0, theta0)
         Y.append(y)
 
@@ -491,6 +491,48 @@ def func(y, x, h, alfa, beta, a, M, r0, theta0):
         yf = [Y[-1][0], Y[-1][2], Y[-1][4]]
 
     return yf
+
+
+@jit(nopython=True)
+def func_status(y, x, h, alfa, beta, a, M, r0, theta0):
+    """Like `func`, but also returns a status: 0 escaped, 1 captured, 3 numerical failure (NaN)."""
+    r_h = 1.01 * M * (1 + np.sqrt(1 - a**2))
+    while y[0] > r_h:
+        (h, x, y) = run_kut4_mod(geo, x, y, h, a, M, alfa, beta, r0, theta0)
+        if np.isnan(y[0]) or np.isnan(y[2]) or np.isnan(y[4]):
+            return y[0], y[2], y[4], 3
+        if y[0] > 30:
+            return y[0], y[2], y[4], 0
+    return y[0], y[2], y[4], 1
+
+
+@jit(nopython=True, parallel=True)
+def f_paral(r0, theta0, a, M, alfa, beta):
+    """Multicore driver: trace one ray per (alfa, beta) grid point.
+
+    Returns (r, theta, phi, status) matrices of shape (len(alfa), len(beta)).
+    """
+    Mr = np.zeros((len(alfa), len(beta)))
+    Mthet = np.zeros((len(alfa), len(beta)))
+    Mphi = np.zeros((len(alfa), len(beta)))
+    Mstat = np.zeros((len(alfa), len(beta)), dtype=np.int64)
+
+    for i in prange(len(alfa)):
+        for j in range(len(beta)):
+            y = np.array(
+                [
+                    r0,
+                    dr(r0, a, M, theta0, alfa[i], beta[j]),
+                    theta0,
+                    dthe(r0, a, M, theta0, alfa[i]),
+                    0.0,
+                ]
+            )
+            (Mr[i, j], Mthet[i, j], Mphi[i, j], Mstat[i, j]) = func_status(
+                y, 300.0, -0.02, alfa[i], beta[j], a, M, r0, theta0
+            )
+
+    return (Mr, Mthet, Mphi, Mstat)
 
 
 # ---------------------------------------------------------------------------
