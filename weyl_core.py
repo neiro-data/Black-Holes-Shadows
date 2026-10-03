@@ -31,12 +31,11 @@ Load-bearing conventions (do not "fix" these without re-deriving the physics):
   passing a large read-only array through every recursive RK step, which is both slower
   and a bigger churn to the numba-compiled call graph than the existing global.
 
-* **``parallel=True`` on all numba-jitted core functions.** This mirrors
-  ``test_parallel_SHADOW.py`` (the production/canonical implementation) even for
-  functions that are also called from the serial driver (``test_Z_SHADOW.py``);
-  numba's ``parallel=True`` only auto-parallelizes loops it can prove are safe (e.g. the
-  ``prange`` loop in ``f_paral``), so it is a strict superset behaviourally and keeps a
-  single compiled core shared by both the parallel and serial drivers.
+* **``parallel=True`` only on ``f_paral``.** It is the one function with a ``prange``
+  loop; every other jitted helper is scalar code numba cannot parallelize, and flagging it
+  ``parallel=True`` only raised ``NumbaPerformanceWarning``. The helpers are called from
+  inside the ``prange`` body (and from the serial driver ``test_Z_SHADOW.py``), so dropping
+  the flag there changes neither results nor parallel speed.
 """
 
 import math
@@ -77,7 +76,7 @@ def load_matrix(path: str) -> None:
 # ---------------------------------------------------------------------------
 # Numerical integration / differentiation helpers
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def simps(f, l, z, a, b, N, *args):
     """Composite Simpson's rule integrator of `f` along axis `l` (0=first arg, 1=second)."""
     if N % 2 == 1:
@@ -94,7 +93,7 @@ def simps(f, l, z, a, b, N, *args):
     return S
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def derivative(f, l, x, y, hder, *args):
     """Central finite difference of `f` w.r.t. its first (l=0) or second (l=1) argument."""
     if l == 0:
@@ -108,12 +107,12 @@ def derivative(f, l, x, y, hder, *args):
 # ---------------------------------------------------------------------------
 # Weyl-coordinate distances to the two Schwarzschild "rod" endpoints (+/-M on the axis)
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def d1(rho, z, M):
     return np.sqrt(rho**2 + (z - M) ** 2)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def d2(rho, z, M):
     return np.sqrt(rho**2 + (z + M) ** 2)
 
@@ -121,7 +120,7 @@ def d2(rho, z, M):
 # ---------------------------------------------------------------------------
 # Inverted Morgan-Morgan disk potentials
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def xi2(R, z, a):
     """Oblate-spheroidal-like coordinate used by the Morgan-Morgan disk potential.
 
@@ -137,7 +136,7 @@ def xi2(R, z, a):
     ) / np.sqrt(2)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def nuD(R, z, M, a):
     """Morgan-Morgan (inverted) thin-disk contribution to the nu potential."""
     if xi2(R, z, a) == 0.0:
@@ -198,7 +197,7 @@ def nuD(R, z, M, a):
 
 # l = 0 -> derivative w.r.t. RHO ; l = 1 -> derivative w.r.t. Z
 # m = 0 -> nuSch (BH only) ; m = 1 -> nuD (disk only) ; m = 2 -> nuSch + nuD (BH + disk)
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def nu(rho, z, M, MD, b, m):
     """nu potential: BH (Schwarzschild), disk (Morgan-Morgan) or the sum, per the `m` selector."""
     nuSch = math.log(
@@ -212,7 +211,7 @@ def nu(rho, z, M, MD, b, m):
         return nuSch + nuD(rho, z, MD, b)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def lambSch(rho, z, M, MD, b):
     """Analytic Schwarzschild lambda potential (used as the outer boundary value for lamb_Mat)."""
     sigma = np.sqrt((rho**2 + z**2 + M**2) ** 2 - 4 * z**2 * M**2)
@@ -323,12 +322,12 @@ def solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0, R_initial_guess=1
 # ---------------------------------------------------------------------------
 # Lambda potential: derivatives, quadrature tabulation, and lookup-matrix interpolation
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def derNU(rho, z, M, MD, b, l, m, hder):
     return derivative(nu, l, rho, z, hder, M, MD, b, m)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dlamb(z, rho, M, MD, b, l, m, hder):
     if l == 0:
         return (
@@ -340,7 +339,7 @@ def dlamb(z, rho, M, MD, b, l, m, hder):
         return rho * derNU(rho, z, M, MD, b, 0, m, hder) * derNU(rho, z, M, MD, b, 1, m, hder)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dlamb2(rho, z, M, MD, b, l, m, hder):
     if l == 0:
         return (
@@ -374,7 +373,7 @@ def lamb_Mat(rho, z, M, MD, b, m, hder):
         )
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def lamb(rho, z, M, MD, b, m):
     """Bilinear interpolation of the lambda potential from the loaded `Mat_nu` lookup table.
 
@@ -410,57 +409,57 @@ def lamb(rho, z, M, MD, b, m):
 # ---------------------------------------------------------------------------
 # Metric components and derived geodesic quantities
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def gtt(rho, z, M, MD, b):
     return -math.exp(nu(rho, z, M, MD, b, 2))
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def grr(rho, z, M, MD, b):
     return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def gzz(rho, z, M, MD, b):
     return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def gpp(rho, z, M, MD, b):
     return rho**2 * math.exp(-nu(rho, z, M, MD, b, 2))
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def zeta(rho, z, M, MD, b):
     return np.sqrt(-1 / gtt(rho, z, M, MD, b))
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dthe(rho, z, M, MD, b, alfa):
     return 1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alfa)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dr(rho, z, M, MD, b, alfa, beta):
     return 1 / np.sqrt(grr(rho, z, M, MD, b)) * np.cos(alfa) * np.cos(beta)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def Pphi(rho, z, M, MD, b, alfa, beta):
     return np.sqrt(gpp(rho, z, M, MD, b)) * np.sin(beta) * np.cos(alfa)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def Pt(rho, z, M, MD, b, alfa, beta):
     return -1 / zeta(rho, z, M, MD, b)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dphi(rho, z, M, MD, b, alfa, beta, p_phi):
     return 1 / gpp(rho, z, M, MD, b) * p_phi
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def dt(rho, z, M, MD, b, alfa, beta, p_t):
     return 1 / gtt(rho, z, M, MD, b) * p_t
 
@@ -470,7 +469,7 @@ def dt(rho, z, M, MD, b, alfa, beta, p_t):
 #
 # Coefficients and step-control logic are untouched from the legacy implementation.
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def run_kut4_mod(F, x, y, h, *args):
     hmax = -0.04
     hmin = -(10**-7)
@@ -564,7 +563,7 @@ def run_kut4_mod(F, x, y, h, *args):
 #  - geo_lensing/func_lensing: 5-state [rho, drho, z, dz, phi] -- used by the lensing
 #    driver (test_symmetry_lensing.py) which also needs the accumulated phi coordinate.
 # ---------------------------------------------------------------------------
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     """Geodesic RHS for the 4-state [rho, drho, z, dz] system (no phi tracking)."""
     pphi = Pphi(rho0, z0, M, MD, b, alfa, beta)
@@ -615,7 +614,7 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     return np.array([z[1], d2Rdt, z[3], d2Thedt])
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
     """Trace a single null geodesic (4-state) until it hits the BH, escapes, or crosses the disk.
 
@@ -649,13 +648,13 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
     return yf
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def func_bh_disk_crossing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
     """`func` with the disk always visible (kept for test_Z_SHADOW.py)."""
     return func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, True)
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def geo_lensing(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     """Geodesic RHS for the 5-state [rho, drho, z, dz, phi] system (lensing variant).
 
@@ -712,7 +711,7 @@ def geo_lensing(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
     return np.array([z[1], d2Rdt, z[3], d2Thedt, dPhidt])
 
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True)
 def func_lensing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
     """Trace a single null geodesic (5-state, with phi) for the lensing driver.
 
