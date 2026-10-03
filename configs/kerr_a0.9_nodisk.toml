@@ -14,3 +14,5 @@ n = 160
 
 [plot]
 palette = "grey_black_white"
+background = "palette"
+grid = false

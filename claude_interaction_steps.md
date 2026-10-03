@@ -114,3 +114,9 @@ numerical behaviour.
 - `generate_matriz.py` / `weyl_core.load_matrix`: lambda table saved as compressed `.npz` (key `lam`); 37.4 MB -> 10.8 MB, load 0.23 s -> 0.04 s; `.txt` still readable. Parquet rejected (columnar, extra dep).
 - Added `tqdm` dep; tests for layout/metadata, chunk parity, timestamp validation; docs updated. 15 pytest pass; ruff clean.
 - Asked and dropped: extra `time_spent` field (`elapsed_s` already covers it). Run outputs (status/coord txt) left as text.
+
+## feat/plot-visuals — selectable plot visuals (background + grid)
+- Plan: plan-plot-visuals.md; scope revised to post-process only (no tracer change, weyl_core.py untouched).
+- python-pro implemented visuals.py, [plot] config keys, examples, docs; python-conventions pass; test-automator added tests (58 pass, n<=16); code-reviewer -> handoff-plot-visuals.md; 4 small defects fixed inline, rest left low/open.
+- Not committed; awaiting user.
+- Follow-up: runs verified with small n + cached MD=0 matrix; numba `parallel=True` NumbaPerformanceWarning is pre-existing (weyl_core.derivative), not an error. Each example TOML now carries a header comment (purpose, run command, caveats). Committed + PR opened into main (landing on main is human).

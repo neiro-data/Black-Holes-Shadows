@@ -19,6 +19,7 @@ import numba
 import numpy as np
 from tqdm import tqdm
 
+import visuals
 import weyl_core as wc
 from generate_matriz import ensure_matrix
 from shadow_config import ShadowConfig
@@ -196,7 +197,11 @@ def save_run(
         if key in out:
             np.savetxt(run_dir / f"{key}.txt", out[key])
     if cfg.save or cfg.show:
-        plot_status(out["status"], cfg, run_dir / "image.png" if cfg.save else None)
+        img_path = run_dir / "image.png" if cfg.save else None
+        if cfg.background == "palette":
+            plot_status(out["status"], cfg, img_path)
+        else:
+            visuals.render_image(out, cfg, img_path)
     meta = cfg.to_metadata() | {
         "config_path": config_path,
         "elapsed_s": elapsed_s,

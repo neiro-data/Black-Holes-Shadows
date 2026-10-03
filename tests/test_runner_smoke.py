@@ -2,6 +2,7 @@
 
 import json
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,6 +10,7 @@ import pytest
 import generate_matriz as gm
 import run_shadow as rs
 import shadow_config as sc
+import visuals as vis
 import weyl_core as wc
 
 
@@ -65,3 +67,56 @@ def test_func_disk_off_matches_wrapper_on_nodisk_rays():
             assert list(on) == list(off)
         else:
             assert on[1] > 49.0
+
+
+EXAMPLES = sorted(Path("configs/examples").glob("*.toml"))
+TINY = {"n": 8, "n_grid": 20, "MD": 0.0, "source_opt": "analytic", "parallel": False, "show": False}
+
+
+def _tiny(path, **extra):
+    ov = dict(TINY) | extra
+    if "disk" in path.name or "greyscale" in path.name or "two_color" in path.name:
+        ov["disk_visible_opt"] = True  # MD=0 override: keep the disk branch, cheap matrix
+    return sc.ShadowConfig.from_toml(path, ov)
+
+
+@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.stem)
+def test_example_configs_render_image(path):
+    cfg = _tiny(path)
+    if cfg.backend == "kerr":
+        cfg = sc.ShadowConfig.from_toml(path, {"n": 8, "parallel": False})
+    out = rs.trace_grid(cfg, progress=False)
+    rs.save_run(cfg, out, config_path=str(path))
+    assert (cfg.run_dir / "image.png").stat().st_size > 0
+
+
+@pytest.mark.parametrize("cfg_file", ["schwarzschild_nodisk", "kerr_a0.9_nodisk"])
+def test_four_color_orientation(cfg_file, tmp_path):
+    cfg = sc.ShadowConfig.from_toml(
+        f"configs/{cfg_file}.toml",
+        {"n": 16, "n_grid": 20, "background": "four_color", "parallel": False},
+    )
+    out = rs.trace_grid(cfg, progress=False)
+    theta, phi = vis.sky_directions(out, cfg)
+    rgb = vis.compose_rgb(out["status"], theta, phi, vis.VisualSpec.from_config(cfg))
+    # imshow origin="lower": last row is the top, column 0 the left
+    assert out["status"][-1, 0] == 0 and out["status"][0, -1] == 0
+    assert np.array_equal(rgb[-1, 0], vis.RED)  # top-left
+    assert np.array_equal(rgb[0, -1], vis.BLUE)  # bottom-right
+    rs.save_run(cfg, out)
+    assert (cfg.run_dir / "image.png").exists()
+
+
+def test_palette_still_uses_plot_status(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rs, "plot_status", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(rs.visuals, "render_image", lambda *a, **k: calls.append("visuals"))
+    cfg = sc.ShadowConfig.from_toml("configs/schwarzschild_nodisk.toml", {"n": 8})
+    out = {"status": np.zeros((8, 8), int), "coord1": np.zeros((8, 8)), "coord2": np.zeros((8, 8))}
+    rs.save_run(cfg, out)
+    assert len(calls) == 1 and calls[0][0] is out["status"]
+    cfg2 = sc.ShadowConfig.from_toml(
+        "configs/schwarzschild_nodisk.toml", {"n": 8, "background": "two_color"}
+    )
+    rs.save_run(cfg2, out)
+    assert calls[-1] == "visuals" and len(calls) == 2

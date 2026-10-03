@@ -131,6 +131,10 @@ uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 16
 - **Output folder:** `runs/<YYYYMMDD_HHMMSS>_<name>/` (local time). Each run gets its own folder.
 - **Files:** `config.resolved.toml`, `run.json`, `status.txt`, `coord1.txt`, `coord2.txt`,
   `phi.txt` (Kerr), `image.png`.
+- **Visuals:** set `[plot] background` (see [SCHEMA.md](SCHEMA.md#config-keys--plot)); the image
+  is composed from the saved arrays by `visuals.py`. Examples:
+  `uv run python run_shadow.py configs/examples/visual_two_color.toml --n 16`, and likewise
+  `visual_black_hole`, `visual_greyscale`, `visual_four_color_grid`, `visual_image`.
 - **`run.json`:** `run_id`, `timestamp`, `timestamp_iso`, `name`, `config_path`, `backend`, `M`,
   `a`, `MD`, `b`, `distance`, `theta0`, `n`, `half_angle`, `disk_visible`, `parallel`,
   `matrix_source`, `n_grid`, `palette`, `elapsed_s`, `shadow_pixels`, `numba_threads`,

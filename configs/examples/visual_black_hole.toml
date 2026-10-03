@@ -1,0 +1,22 @@
+# Shadow only: white sky-free silhouette, black hole in black (no lensed background).
+# Schwarzschild, no disk. Reuses the cached MD=0 matrix, so it runs fast.
+# Run:  uv run python run_shadow.py configs/examples/visual_black_hole.toml --n 48
+# Note: `grid = true` is a config error with this background (it would turn it into a lensing image).
+
+name = "visual_black_hole"
+
+[spacetime]
+M  = 1.0
+a  = 0.0
+MD = 0.0
+b  = 6.0
+
+[observer]
+distance = 15.0
+
+[grid]
+n = 160
+
+
+[plot]
+background = "black_hole"

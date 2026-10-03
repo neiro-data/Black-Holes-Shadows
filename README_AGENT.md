@@ -49,6 +49,12 @@ Before a real run, align four things across `generate_matriz.py` and the tracer 
 name that the generator writes, the name that the tracer reads, `MD`, and `b`. Otherwise
 `load_matrix` finds no matching file.
 
+## Plot visuals
+
+`visuals.py` colours the final image from the arrays the tracers already return; it never traces.
+Weyl `coord*` keep their sentinels (capture `[0.001, 0.001]`, disk `z + 50`) and have no phi, so
+Weyl phi is a flat-sky approximation from the pixel column. See SCHEMA.md `[plot]`.
+
 ## Relation to the other repository
 
 This repository covers the same domain as `Black-Holes-Shadows` in the same workspace. This one is

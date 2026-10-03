@@ -79,6 +79,12 @@ exist, from `black_white` to `quadrant`, which gives one colour per lensed-disk 
 An optional hook, `weyl_plot.load_grid_from_image(path)`, builds a grid mask from an image that
 you supply.
 
+The config runner can also colour the final image from the ray outcome, with `[plot] background`
+(`palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image`) and an optional
+celestial-sphere `grid`. This is a post-process on the traced arrays and adds no tracing cost. The
+Weyl backend has no traced phi, so left/right and grid phi lines use a flat-sky approximation. Keys
+are in [SCHEMA.md](SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
+
 See [scripts-guide.md — Colormaps](scripts-guide.md#colormaps).
 
 ## Data files

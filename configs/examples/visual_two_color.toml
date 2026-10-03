@@ -1,0 +1,27 @@
+# Two-colour sky: upper half red, lower half blue; the disk is drawn semi-transparent white.
+# Schwarzschild + disk (MD = 0.1, quadrature matrix: slow to build the first time).
+# Fast check with the cached MD=0 matrix and the disk forced on:
+#   uv run python run_shadow.py configs/examples/visual_two_color.toml --n 48 --MD 0.0 --disk-visible true
+# disk_alpha (0..1): disk opacity; the disk is blended over a fixed neutral grey (no direction behind it).
+
+name = "visual_two_color"
+
+[spacetime]
+M  = 1.0
+a  = 0.0
+MD = 0.1
+b  = 6.0
+
+[observer]
+distance = 15.0
+
+[grid]
+n = 160
+
+[matrix]
+n_grid = 1200
+source = "auto"
+
+[plot]
+background = "two_color"
+disk_alpha = 0.6

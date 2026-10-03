@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+BACKGROUNDS = ("palette", "black_hole", "two_color", "greyscale", "four_color", "image")
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
 RUNS_DIR = Path("runs")
 _STAMP_RE = re.compile(r"\d{8}_\d{6}")
@@ -40,6 +42,12 @@ class ShadowConfig:
     source_opt: str = "auto"
     # plot
     palette: str = "grey_black_white"
+    background: str = "palette"
+    grid: bool = False
+    grid_step_deg: float = 10.0
+    grid_width_deg: float = 0.4
+    disk_alpha: float = 0.6
+    image_path: str = ""
     save: bool = True
     show: bool = False
     # run identity (local time; not read from / written to TOML)
@@ -69,6 +77,23 @@ class ShadowConfig:
             raise ValueError(
                 f"disk_visible must be 'auto', true or false: {self.disk_visible_opt!r}"
             )
+        if self.background not in BACKGROUNDS:
+            raise ValueError(f"background must be one of {BACKGROUNDS}, got {self.background!r}")
+        if self.grid and self.background in ("palette", "black_hole"):
+            raise ValueError(f"grid is not supported with background {self.background!r}")
+        if not 0 < self.grid_step_deg <= 90:
+            raise ValueError(f"grid_step_deg must satisfy 0 < x <= 90, got {self.grid_step_deg}")
+        if not 0 < self.grid_width_deg < self.grid_step_deg / 2:
+            raise ValueError(
+                f"grid_width_deg must satisfy 0 < x < step/2, got {self.grid_width_deg}"
+            )
+        if not 0 <= self.disk_alpha <= 1:
+            raise ValueError(f"disk_alpha must satisfy 0 <= x <= 1, got {self.disk_alpha}")
+        if self.background == "image":
+            if not self.image_path:
+                raise ValueError("background 'image' requires plot.image")
+            if not Path(self.image_path).is_file():
+                raise ValueError(f"image not found: {self.image_path}")
         if self.backend == "weyl" and self.a != 0:
             raise ValueError("backend 'weyl' requires a == 0")
         if self.backend == "kerr" and self.MD > 0:
@@ -129,6 +154,12 @@ class ShadowConfig:
             "matrix_source": self.matrix_source if weyl else None,
             "n_grid": self.n_grid if weyl else None,
             "palette": self.palette,
+            "background": self.background,
+            "grid": self.grid,
+            "image_path": self.image_path or None,
+            "grid_step_deg": self.grid_step_deg,
+            "grid_width_deg": self.grid_width_deg,
+            "disk_alpha": self.disk_alpha,
         }
 
     @classmethod
@@ -157,9 +188,21 @@ class ShadowConfig:
             flat["n_grid"] = mx["n_grid"]
         if "source" in mx:
             flat["source_opt"] = mx["source"]
-        for key in ("palette", "save", "show"):
-            if key in raw.get("plot", {}):
-                flat[key] = raw["plot"][key]
+        plot = raw.get("plot", {})
+        for key in (
+            "palette",
+            "background",
+            "grid",
+            "grid_step_deg",
+            "grid_width_deg",
+            "disk_alpha",
+            "save",
+            "show",
+        ):
+            if key in plot:
+                flat[key] = plot[key]
+        if plot.get("image"):
+            flat["image_path"] = str((Path(path).parent / plot["image"]).resolve())
         flat.update({k: v for k, v in (overrides or {}).items() if v is not None})
         return cls(**flat)
 
@@ -175,8 +218,11 @@ class ShadowConfig:
             f"[tracer]\ndisk_visible = {disk_s}\nparallel = {str(d['parallel']).lower()}\n"
             f'backend = "{d["backend_opt"]}"\n\n'
             f'[matrix]\nn_grid = {d["n_grid"]}\nsource = "{d["source_opt"]}"\n\n'
-            f'[plot]\npalette = "{d["palette"]}"\nsave = {str(d["save"]).lower()}\n'
-            f"show = {str(d['show']).lower()}\n"
+            f'[plot]\npalette = "{d["palette"]}"\nbackground = "{d["background"]}"\n'
+            f"grid = {str(d['grid']).lower()}\ngrid_step_deg = {d['grid_step_deg']}\n"
+            f"grid_width_deg = {d['grid_width_deg']}\ndisk_alpha = {d['disk_alpha']}\n"
+            f"image = {json.dumps(d['image_path'])}\n"
+            f"save = {str(d['save']).lower()}\nshow = {str(d['show']).lower()}\n"
         )
 
     def write_resolved(self) -> Path:
