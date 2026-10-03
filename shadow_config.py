@@ -37,6 +37,7 @@ class ShadowConfig:
     disk_visible_opt: str | bool = "auto"
     parallel: bool = True
     backend_opt: str = "auto"
+    device_opt: str = "auto"
     # matrix (Weyl only)
     n_grid: int = 1200
     source_opt: str = "auto"
@@ -71,6 +72,8 @@ class ShadowConfig:
             )
         if self.backend_opt not in ("auto", "weyl", "kerr"):
             raise ValueError(f"backend must be auto|weyl|kerr, got {self.backend_opt!r}")
+        if self.device_opt not in ("auto", "cpu", "gpu"):
+            raise ValueError(f"device must be auto|cpu|gpu, got {self.device_opt!r}")
         if self.source_opt not in ("auto", "analytic", "quadrature"):
             raise ValueError(f"matrix source must be auto|analytic|quadrature: {self.source_opt!r}")
         if self.disk_visible_opt not in ("auto", True, False):
@@ -151,6 +154,7 @@ class ShadowConfig:
             "half_angle": self.half_angle,
             "disk_visible": self.disk_visible,
             "parallel": self.parallel,
+            "device_opt": self.device_opt,
             "matrix_source": self.matrix_source if weyl else None,
             "n_grid": self.n_grid if weyl else None,
             "palette": self.palette,
@@ -183,6 +187,8 @@ class ShadowConfig:
             flat["parallel"] = tr["parallel"]
         if "backend" in tr:
             flat["backend_opt"] = tr["backend"]
+        if "device" in tr:
+            flat["device_opt"] = tr["device"]
         mx = raw.get("matrix", {})
         if "n_grid" in mx:
             flat["n_grid"] = mx["n_grid"]
@@ -216,7 +222,7 @@ class ShadowConfig:
             f"[observer]\ndistance = {d['distance']}\ntheta0 = {d['theta0']}\n\n"
             f"[grid]\nn = {d['n']}\nhalf_angle = {d['half_angle']}\n\n"
             f"[tracer]\ndisk_visible = {disk_s}\nparallel = {str(d['parallel']).lower()}\n"
-            f'backend = "{d["backend_opt"]}"\n\n'
+            f'backend = "{d["backend_opt"]}"\ndevice = "{d["device_opt"]}"\n\n'
             f'[matrix]\nn_grid = {d["n_grid"]}\nsource = "{d["source_opt"]}"\n\n'
             f'[plot]\npalette = "{d["palette"]}"\nbackground = "{d["background"]}"\n'
             f"grid = {str(d['grid']).lower()}\ngrid_step_deg = {d['grid_step_deg']}\n"

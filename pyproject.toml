@@ -10,6 +10,11 @@ dependencies = [
     "tqdm>=4.70.1",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "mlx>=0.32 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import platform
 import time
@@ -22,11 +23,16 @@ from tqdm import tqdm
 import visuals
 import weyl_core as wc
 from generate_matriz import ensure_matrix
+from gpu_backend import resolve_device
 from shadow_config import ShadowConfig
 from weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
 
+log = logging.getLogger(__name__)
+
 HDER = 10**-6
 CORE_FRACTION = 0.8
+RUN_STATS: dict = {}  # per-run device info from the last `trace_grid`, written to run.json
+GPU_CHUNK_ROWS = 16  # rows per kernel launch; keeps each dispatch under the GPU watchdog
 
 
 def limit_threads(fraction: float = CORE_FRACTION) -> int:
@@ -139,14 +145,40 @@ def _trace_kerr(
     mirror = cfg.theta0 == 90.0
     alfa_t = alfa[: cfg.n // 2] if mirror else alfa
 
+    device = resolve_device(cfg.device_opt, cfg.parallel)
+    RUN_STATS["device"] = device
     if cfg.parallel:
+        if device == "gpu":
+            import kerr_gpu
+
+            tracer = kerr_gpu.f_paral_gpu
+        else:
+            tracer = kc.f_paral
         Mr, Mth, Mphi, Mst = _chunked_rows(
-            lambda s, e: kc.f_paral(cfg.distance, theta0, cfg.a, cfg.M, alfa_t[s:e], beta),
+            lambda s, e: tracer(cfg.distance, theta0, cfg.a, cfg.M, alfa_t[s:e], beta),
             len(alfa_t),
             progress=progress,
-            desc="kerr",
-            chunk=chunk,
+            desc="kerr-gpu" if device == "gpu" else "kerr",
+            chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
         )
+        if device == "gpu":
+            RUN_STATS["gpu_cpu_fallback_pixels"] = 0
+        if device == "gpu":  # float32 failures (status 3) are re-traced in float64 on the CPU
+            for i, j in zip(*np.nonzero(Mst == 3), strict=True):
+                y = np.array(
+                    [
+                        cfg.distance,
+                        kc.dr(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i], beta[j]),
+                        theta0,
+                        kc.dthe(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i]),
+                        0.0,
+                    ]
+                )
+                Mr[i, j], Mth[i, j], Mphi[i, j], Mst[i, j] = kc.func_status(
+                    y, 300.0, -0.02, alfa_t[i], beta[j], cfg.a, cfg.M, cfg.distance, theta0
+                )
+                RUN_STATS["gpu_cpu_fallback_pixels"] += 1
+            log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
         Mr, Mth, Mphi = (np.zeros((len(alfa_t), len(beta))) for _ in range(3))
         Mst = np.zeros((len(alfa_t), len(beta)), dtype=int)
@@ -179,6 +211,8 @@ def trace_grid(
 
     `chunk` = rows per `f_paral` call in the parallel path (default: numba thread count).
     """
+    RUN_STATS.clear()
+    RUN_STATS["device"] = "cpu"  # the Weyl path has no GPU kernel yet
     trace = _trace_weyl if cfg.backend == "weyl" else _trace_kerr
     return trace(cfg, progress=progress, chunk=chunk)
 
@@ -206,6 +240,12 @@ def save_run(
         "config_path": config_path,
         "elapsed_s": elapsed_s,
         "shadow_pixels": int((out["status"] == 1).sum()),
+        "device": RUN_STATS.get("device", "cpu"),
+        **(
+            {"gpu_cpu_fallback_pixels": RUN_STATS["gpu_cpu_fallback_pixels"]}
+            if "gpu_cpu_fallback_pixels" in RUN_STATS
+            else {}
+        ),
         "numba_threads": numba.get_num_threads(),
         "versions": {
             "python": platform.python_version(),
@@ -227,6 +267,7 @@ def parse_args(argv=None) -> tuple[str, dict]:
     p.add_argument("--n", type=int)
     p.add_argument("--name")
     p.add_argument("--disk-visible", choices=["auto", "true", "false"], dest="disk_visible_opt")
+    p.add_argument("--device", choices=["auto", "cpu", "gpu"], dest="device_opt")
     p.add_argument("--no-progress", action="store_true", help="hide the progress bar")
     args = vars(p.parse_args(argv))
     cfg_path = args.pop("config")
