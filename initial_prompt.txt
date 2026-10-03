@@ -1,0 +1,34 @@
+This repository contains the original codes that generate the Black Holes shadows for a Schwarzschild black hole with a superposition of a thin disk with mass.
+
+Characteristics of the codes:
+ - desorganized
+ - have duplicated code
+ - not commented
+
+What the code has?
+ - Mathematical methods for ODEs, integration, derivatives
+ - Functions that correspond physical quantities such as spacetime metrics for different spacetimes, their derivatives, etc
+ - the most compute heavy parts of the code are within functions that are decorated with @jit(nopython = True) from numba
+ - there is also a lot of comented code (which can or not be duplicated) and that eventually can be deleted. Still needs to be analyzed
+ - the plotting part - after the numerical calculations are done, there are plots with multiple colormaps possible of the results
+
+Goals that should be achieved
+ - analyze the codebase and plan a refactoring of the code. The analysis and plan should be carried out by agent architect-orchestrator, and the modifications on the code should be performed by other sub-agents orchestrated by the architect-orchestrator
+ - create a uv project/venv for this repo
+ - comment the code where comments are missing
+ - deprecated duplicated code from the codebase - this can include entire files if they can be merged
+ 
+
+Code specific behaviors:
+ - The compute heavy parts of the code are deorated with numba functions. **This behavior should be maintained**
+    - **Pay special attention to numba** - it can be difficult to accomodate numba functions, but these should work. If needed when debugging, create very small examples that imitate the behavior of the actual functions to see how you can make them work with numba
+ - The code can have multiple "modes" - just a black hole and black hole + disk system. You should account for both and give the user a choice.
+ - There are multiple colormaps - keep the options open: black and white, black, grey and white, colormap (1 color per quadrant,  black for black hole and grid, and white for disk) or even creating a grid from an image loaded by an user
+ - if you can identify it, organize/separate the different physical quantities per metric type / spacetime type
+ - if python objects (strings, float, matrices) that are given as parameters to functions are not used, you can clean the function definitions from them.
+
+Behavior:
+ - You are **allowed** to commit and push directly to main. You are **allowed** to perform all operations in this repository and folder
+ - **Keep the CONTEXT MINIMAL when spawning sub-agents**
+ - **DO NOT** query other repositories outside of this folder. **You can** consult the Claude.md files but **DO NOT** ingest any prior information regarding anything related with black holes or similar 
+ - when testing if code runs, specially the compute costly parts, **DO NOT RUN THE CODE IN FULL**. Instead choose a small set (max 5 or 10 runs) to test if code is running

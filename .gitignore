@@ -12,15 +12,6 @@ dist/
 build/
 *.egg-info/
 
-# Generated analysis output
-data/csv/
-data/parquet/
-data/backups/
-data/reports/
-data/nlp_cache/
-!data/csv/.gitkeep
-!data/parquet/.gitkeep
-
 # Runner outputs
 runs/
 matrices/
