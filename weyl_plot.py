@@ -60,6 +60,40 @@ def classify_shadow_disk(
     return M2
 
 
+STATUS_ESCAPED, STATUS_CAPTURED, STATUS_DISK, STATUS_FAILED = 0, 1, 2, 3
+
+
+def plot_status(status: np.ndarray, cfg, path=None):
+    """Plot a full-image status grid (0 escaped, 1 captured, 2 disk, 3 NaN failure).
+
+    Rows run over alpha (bottom to top), columns over -beta. Failed pixels are drawn red.
+    Saves to `path` when given, shows the figure when `cfg.show` is set.
+    """
+    import matplotlib.pyplot as plt
+
+    h = cfg.half_angle
+    cm = get_colormap(cfg.palette).copy()
+    cm.set_bad("red")
+    img = np.ma.masked_where(status == STATUS_FAILED, status)
+    fig = plt.figure(figsize=(10, 10))
+    plt.imshow(
+        img,
+        cmap=cm,
+        vmin=0,
+        vmax=len(PALETTES[cfg.palette]) - 1,
+        origin="lower",
+        extent=[-h, h, -h, h],
+    )
+    plt.title(f"$M={cfg.M}$, $a={cfg.a}$, $M_D={cfg.MD}$, $b={cfg.b}$ ({cfg.backend})", size=20)
+    plt.xlabel("$-\\beta$", size=20)
+    plt.ylabel("$\\alpha$", size=20)
+    if path is not None:
+        fig.savefig(path, dpi=150)
+    if cfg.show:
+        plt.show()
+    plt.close(fig)
+
+
 def mirror_quadrants(M2: np.ndarray) -> np.ndarray:
     """Mirror a single-quadrant classification grid into the full 4-quadrant image.
 

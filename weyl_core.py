@@ -310,9 +310,9 @@ def gpp_i(rho, z, M, MD, b):
 
 def solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0, R_initial_guess=10.0):
     """Solve for the initial observer's rho such that sqrt(gpp) equals `target_gpp_sqrt`."""
-    func_initial = lambda R: np.sqrt(gpp_i(R, z0, M, MD, b)) - target_gpp_sqrt  # noqa: E731
+    func_initial = lambda R: np.sqrt(gpp_i(float(R[0]), z0, M, MD, b)) - target_gpp_sqrt  # noqa: E731
     R_solution = fsolve(func_initial, R_initial_guess)
-    return float(R_solution)
+    return float(R_solution[0])
 
 
 # ---------------------------------------------------------------------------
@@ -611,65 +611,43 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True, parallel=True)
-def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
+def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
     """Trace a single null geodesic (4-state) until it hits the BH, escapes, or crosses the disk.
 
-    Returns the final [rho, z] pair. The [0.001, 0.001] sentinel marks BH capture;
-    +50.0 offset on z marks a disk crossing (see stopping conditions below).
+    Returns the final [rho, z] pair. The [0.001, 0.001] sentinel marks BH capture. With
+    `disk_visible=True`, a ray that crosses the disk plane outside rho = b stops with its z
+    offset by +50.0 (the disk-hit sentinel). With `disk_visible=False` the disk is ignored.
     """
-    Y = np.zeros((1, 4))
-    Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
+    y_prev = y
+    yf = [y[0], y[2]]
 
     while (
         nu(y[0], y[2], M, MD, b, 2) > -3.0
         and np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) < 30.0
     ):
         (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
-        Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
 
         if np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) >= 30.0:
-            yf = [Y[-1][0], Y[-1][2]]
+            yf = [y[0], y[2]]
             break
 
         elif nu(y[0], y[2], M, MD, b, 2) <= -3.0:
             yf = [0.001, 0.001]
             break
+
+        elif disk_visible and y[0] > b and np.sign(y[2]) == -np.sign(y_prev[2]):
+            yf = [y[0], y[2] + 50.0]
+            break
+
+        y_prev = y
 
     return yf
 
 
 @jit(nopython=True, parallel=True)
 def func_bh_disk_crossing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
-    """Variant of `func` (serial-tracer disk-crossing stop condition, kept for test_Z_SHADOW.
-
-    Same 4-state trace as `func`, but also stops (offsetting z by +50) when the ray
-    crosses rho = b with a sign flip in dz/dlambda, i.e. it crosses the disk plane
-    outside the BH. Kept distinct from `func` because test_parallel_SHADOW.py's f_paral
-    driver does not use this stopping condition.
-    """
-    Y = np.zeros((1, 4))
-    Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
-
-    while (
-        nu(y[0], y[2], M, MD, b, 2) > -3.0
-        and np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) < 30.0
-    ):
-        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
-        Y = np.concatenate((Y, y.reshape((1, 4))), axis=0)
-
-        if np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) >= 30.0:
-            yf = [Y[-1][0], Y[-1][2]]
-            break
-
-        elif nu(y[0], y[2], M, MD, b, 2) <= -3.0:
-            yf = [0.001, 0.001]
-            break
-
-        elif y[0] > b and np.sign(Y[-1][2]) == -np.sign(Y[-2][2]):
-            yf = [Y[-1][0], Y[-1][2] + 50.0]
-            break
-
-    return yf
+    """`func` with the disk always visible (kept for test_Z_SHADOW.py)."""
+    return func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, True)
 
 
 @jit(nopython=True, parallel=True)
@@ -756,7 +734,7 @@ def func_lensing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True, parallel=True)
-def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
+def f_paral(rho0, z0, M, MD, b, alfa, beta, hder, disk_visible=False):
     """Production multicore driver: trace one ray per (alfa, beta) grid point in parallel.
 
     Uses numba's `prange` (requires `parallel=True`, see module docstring) to
@@ -776,7 +754,7 @@ def f_paral(rho0, z0, M, MD, b, alfa, beta, hder):
                 ]
             )
             (Mat[i, j], Mz[i, j]) = func(
-                y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder
+                y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
             )
 
     return (Mat, Mz)

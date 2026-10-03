@@ -1,0 +1,16 @@
+name = "kerr_a0.9_nodisk"
+
+[spacetime]
+M  = 1.0
+a  = 0.9
+MD = 0.0
+
+[observer]
+distance = 15.0
+theta0   = 90.0
+
+[grid]
+n = 160
+
+[plot]
+palette = "grey_black_white"
