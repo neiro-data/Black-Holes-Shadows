@@ -60,3 +60,28 @@ mirrors that quadrant into the full image.
 | --- | --- | --- |
 | `test_Z_SHADOW.py` | 80 by 80 | 40 by 40 |
 | `lensing_r_theta.py` | 752 by 752 | 376 by 376 |
+
+## Config keys — [plot]
+
+All keys are optional. Visuals are a post-process of the saved arrays; they do not change tracing.
+
+| key | values | default | notes |
+| --- | --- | --- | --- |
+| `palette` | colormap name | `"grey_black_white"` | used only when `background = "palette"` |
+| `background` | `palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image` | `"palette"` | `palette` is the legacy `plot_status` image |
+| `grid` | bool | `false` | celestial-sphere lines; an error with `palette` and `black_hole` |
+| `grid_step_deg` | float | `10.0` | 0 < x <= 90 |
+| `grid_width_deg` | float | `0.4` | 0 < x < step/2 |
+| `disk_alpha` | float | `0.6` | 0 to 1; disk opacity for `two_color`, `four_color`, `image` |
+| `image` | path | `""` | required for `background = "image"`; relative to the config file; equirectangular sky |
+| `save`, `show` | bool | `true`, `false` | as before |
+
+Colours: `four_color` is upper-left red, upper-right green, lower-left yellow, lower-right blue;
+`two_color` is red (upper) over blue (lower); `greyscale` is a grey sky with a white disk;
+`black_hole` is white sky and black shadow. Captured pixels are black, failed pixels red.
+
+Directions come from the arrays already traced. Kerr: theta is `coord2`, phi is `phi`. Weyl:
+theta is `pi - atan2(rho, z)` from `coord1`/`coord2`, and phi is a flat-sky approximation from the
+pixel column (`pi + PHI_LEFT_SIGN * beta`), so Weyl grid phi lines and `image` columns are
+approximate. A disk pixel has no direction behind the disk, so it is `disk_alpha * white` over a
+fixed dark grey (`visuals.DISK_BACKDROP`, 0.25); `greyscale` draws it opaque white.

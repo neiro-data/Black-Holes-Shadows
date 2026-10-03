@@ -1,0 +1,24 @@
+# Four-colour sky (upper-left red, upper-right green, lower-left yellow, lower-right blue)
+# plus a celestial-sphere grid. Kerr a = 0.9, observer at the equator, no disk.
+# Kerr gives the true final (theta, phi) per ray, so the grid is exact on the r ~ 30 escape sphere.
+# Run:  uv run python run_shadow.py configs/examples/visual_four_color_grid.toml --n 48
+# grid_step_deg should divide 360 (other steps leave a seam at phi = 0); grid_width_deg < step/2.
+
+name = "visual_four_color_grid"
+
+[spacetime]
+M  = 1.0
+a  = 0.9
+MD = 0.0
+
+[observer]
+distance = 15.0
+
+[grid]
+n = 160
+
+
+[plot]
+background = "four_color"
+grid = true
+grid_step_deg = 10.0

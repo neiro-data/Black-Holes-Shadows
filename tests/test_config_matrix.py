@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import numpy as np
@@ -53,3 +54,75 @@ def test_timestamp_validation_and_run_dir(tmp_path):
         ShadowConfig.from_toml(cfg_file, {"timestamp": "bad"})
     cfg = ShadowConfig.from_toml(cfg_file, {"timestamp": "20260101_000000"})
     assert cfg.run_dir.name == "20260101_000000_x"
+
+
+def _png(tmp_path, name="sky.png"):
+    import matplotlib.pyplot as plt
+
+    p = tmp_path / name
+    plt.imsave(p, np.zeros((2, 2, 3)))
+    return p
+
+
+def test_plot_defaults_equal_legacy(tmp_path):
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""))
+    assert cfg.background == "palette" and cfg.grid is False
+    assert (cfg.grid_step_deg, cfg.grid_width_deg, cfg.disk_alpha) == (10.0, 0.4, 0.6)
+    assert cfg.image_path == ""
+
+
+@pytest.mark.parametrize(
+    "ov",
+    [
+        {"background": "nope"},
+        {"grid": True, "background": "black_hole"},
+        {"grid": True},  # palette
+        {"background": "image"},
+        {"background": "image", "image_path": "/nonexistent/sky.png"},
+        {"disk_alpha": -0.1},
+        {"disk_alpha": 1.1},
+        {"grid_step_deg": 0.0},
+        {"grid_step_deg": 91.0},
+        {"grid_width_deg": 0.0},
+        {"grid_step_deg": 10.0, "grid_width_deg": 5.0},
+    ],
+)
+def test_plot_validation_errors(tmp_path, ov):
+    with pytest.raises(ValueError):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov)
+
+
+def test_disk_alpha_bounds_accepted(tmp_path):
+    for alpha in (0.0, 1.0):
+        assert ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"disk_alpha": alpha})
+
+
+def test_relative_image_resolves_against_config_dir(tmp_path):
+    sub = tmp_path / "cfgs"
+    sub.mkdir()
+    png = _png(sub)
+    body = '[plot]\nbackground = "image"\nimage = "sky.png"\n'
+    p = sub / "c.toml"
+    p.write_text(body)
+    cfg = ShadowConfig.from_toml(p)
+    assert cfg.image_path == str(png.resolve())
+
+
+def test_missing_image_key_with_image_background_raises(tmp_path):
+    with pytest.raises(ValueError):
+        ShadowConfig.from_toml(write_cfg(tmp_path, '[plot]\nbackground = "image"\n'))
+
+
+def test_plot_to_toml_round_trip(tmp_path):
+    png = _png(tmp_path)
+    src = write_cfg(
+        tmp_path,
+        '[plot]\nbackground = "image"\nimage = "sky.png"\ngrid = true\n'
+        "grid_step_deg = 15.0\ngrid_width_deg = 0.5\ndisk_alpha = 0.25\n",
+    )
+    cfg = ShadowConfig.from_toml(src, {"timestamp": "20260101_000000"})
+    out = tmp_path / "round.toml"
+    out.write_text(cfg.to_toml())
+    back = ShadowConfig.from_toml(out, {"timestamp": "20260101_000000"})
+    assert back == dataclasses.replace(cfg, name=cfg.run_name)  # to_toml pins the run name
+    assert back.image_path == str(png.resolve())
