@@ -10,7 +10,7 @@ distance = 15.0
 theta0   = 90.0
 
 [grid]
-n = 320
+n = 160
 
 [plot]
 palette = "grey_black_white"
