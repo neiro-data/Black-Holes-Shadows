@@ -98,6 +98,7 @@ The config runner can also colour the final image from the ray outcome, with `[p
 (`palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image`) and an optional
 celestial-sphere `grid`. This is a post-process on the traced arrays and adds no tracing cost. The
 Weyl backend has no traced phi, so left/right and grid phi lines use a flat-sky approximation. Keys
+`light_source = true` adds a white glow behind the black hole (two_color/four_color), which lenses into a bright ring. Keys
 are in [SCHEMA.md](SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
 
 See [scripts-guide.md — Colormaps](scripts-guide.md#colormaps).

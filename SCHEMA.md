@@ -73,6 +73,9 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 | `grid_step_deg` | float | `10.0` | 0 < x <= 90 |
 | `grid_width_deg` | float | `0.4` | 0 < x < step/2 |
 | `disk_alpha` | float | `0.6` | 0 to 1; disk opacity for `two_color`, `four_color`, `image` |
+| `light_source` | bool | `false` | white glow behind the black hole; only with `two_color`, `four_color` |
+| `light_alpha` | float | `0.7` | 0 to 1; glow peak opacity |
+| `light_radius_deg` | float | `10.0` | > 0; Gaussian sigma of the glow, in degrees |
 | `image` | path | `""` | required for `background = "image"`; relative to the config file; equirectangular sky |
 | `save`, `show` | bool | `true`, `false` | as before |
 
@@ -85,3 +88,6 @@ theta is `pi - atan2(rho, z)` from `coord1`/`coord2`, and phi is a flat-sky appr
 pixel column (`pi + PHI_LEFT_SIGN * beta`), so Weyl grid phi lines and `image` columns are
 approximate. A disk pixel has no direction behind the disk, so it is `disk_alpha * white` over a
 fixed dark grey (`visuals.DISK_BACKDROP`, 0.25); `greyscale` draws it opaque white.
+
+The light source is a Gaussian glow around the point behind the observer (`theta = pi - theta0`,
+`phi = pi`; Weyl uses `theta0 = 90 deg`). Layers: sky, glow, grid, then captured/disk/failed.

@@ -48,6 +48,9 @@ class ShadowConfig:
     grid_step_deg: float = 10.0
     grid_width_deg: float = 0.4
     disk_alpha: float = 0.6
+    light_source: bool = False
+    light_alpha: float = 0.7
+    light_radius_deg: float = 10.0
     image_path: str = ""
     save: bool = True
     show: bool = False
@@ -92,6 +95,12 @@ class ShadowConfig:
             )
         if not 0 <= self.disk_alpha <= 1:
             raise ValueError(f"disk_alpha must satisfy 0 <= x <= 1, got {self.disk_alpha}")
+        if self.light_source and self.background not in ("two_color", "four_color"):
+            raise ValueError(f"light_source is not supported with background {self.background!r}")
+        if not 0 <= self.light_alpha <= 1:
+            raise ValueError(f"light_alpha must satisfy 0 <= x <= 1, got {self.light_alpha}")
+        if not self.light_radius_deg > 0:
+            raise ValueError(f"light_radius_deg must be > 0, got {self.light_radius_deg}")
         if self.background == "image":
             if not self.image_path:
                 raise ValueError("background 'image' requires plot.image")
@@ -164,6 +173,9 @@ class ShadowConfig:
             "grid_step_deg": self.grid_step_deg,
             "grid_width_deg": self.grid_width_deg,
             "disk_alpha": self.disk_alpha,
+            "light_source": self.light_source,
+            "light_alpha": self.light_alpha,
+            "light_radius_deg": self.light_radius_deg,
         }
 
     @classmethod
@@ -202,6 +214,9 @@ class ShadowConfig:
             "grid_step_deg",
             "grid_width_deg",
             "disk_alpha",
+            "light_source",
+            "light_alpha",
+            "light_radius_deg",
             "save",
             "show",
         ):
@@ -227,6 +242,8 @@ class ShadowConfig:
             f'[plot]\npalette = "{d["palette"]}"\nbackground = "{d["background"]}"\n'
             f"grid = {str(d['grid']).lower()}\ngrid_step_deg = {d['grid_step_deg']}\n"
             f"grid_width_deg = {d['grid_width_deg']}\ndisk_alpha = {d['disk_alpha']}\n"
+            f"light_source = {str(d['light_source']).lower()}\n"
+            f"light_alpha = {d['light_alpha']}\nlight_radius_deg = {d['light_radius_deg']}\n"
             f"image = {json.dumps(d['image_path'])}\n"
             f"save = {str(d['save']).lower()}\nshow = {str(d['show']).lower()}\n"
         )

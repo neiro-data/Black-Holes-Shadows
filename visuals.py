@@ -8,6 +8,11 @@ z-mirrored) and phi is a flat-sky approximation from the pixel column (beta).
 Disk pixels have no direction behind the disk, so they blend
 `disk_alpha * white` over the fixed neutral `DISK_BACKDROP`.
 
+Light source (two_color / four_color, `light_source = true`): a white Gaussian glow around the
+point behind the observer (`theta = pi - theta_obs`, `phi = pi`) is blended over the sky colour,
+so lensed rays form a bright ring around the shadow. Layering: sky, glow, grid, then
+captured/disk/failed.
+
 Quadrants, as the observer sees them (flat-sky limit): upper-left red, upper-right green,
 lower-left yellow, lower-right blue. "Upper" is theta < pi/2; left/right is the sign of
 `phi_rel = wrap(phi - pi)` times `PHI_LEFT_SIGN`.
@@ -50,13 +55,26 @@ class VisualSpec:
     width_deg: float = 0.4
     disk_alpha: float = 0.6
     sky: np.ndarray | None = None
+    light_source: bool = False
+    light_alpha: float = 0.7
+    light_radius_deg: float = 10.0
+    theta_obs: float = np.pi / 2  # observer polar angle (rad)
 
     @classmethod
     def from_config(cls, cfg) -> VisualSpec:
         """Build a spec from a `ShadowConfig`, loading the sky image when needed."""
         sky = load_sky_image(cfg.image_path) if cfg.background == "image" else None
         return cls(
-            cfg.background, cfg.grid, cfg.grid_step_deg, cfg.grid_width_deg, cfg.disk_alpha, sky
+            background=cfg.background,
+            grid=cfg.grid,
+            step_deg=cfg.grid_step_deg,
+            width_deg=cfg.grid_width_deg,
+            disk_alpha=cfg.disk_alpha,
+            sky=sky,
+            light_source=cfg.light_source,
+            light_alpha=cfg.light_alpha,
+            light_radius_deg=cfg.light_radius_deg,
+            theta_obs=np.pi / 2 if cfg.backend == "weyl" else float(np.deg2rad(cfg.theta0)),
         )
 
 
@@ -118,6 +136,25 @@ def grid_mask(theta: np.ndarray, phi: np.ndarray, step_deg: float, width_deg: fl
         return (dth <= w) | (dph * np.sin(theta) <= w)
 
 
+def light_weight(
+    theta: np.ndarray, phi: np.ndarray, theta_behind: float, radius_deg: float, alpha: float
+) -> np.ndarray:
+    """Glow weight `alpha * exp(-d^2 / (2 sigma^2))` around the behind-observer point.
+
+    `d` is the great-circle angle to (`theta_behind`, phi = pi); NaN angles give weight 0.
+    """
+    theta = np.asarray(theta, dtype=float)
+    phi = np.asarray(phi, dtype=float)
+    sigma = np.deg2rad(radius_deg)
+    with np.errstate(invalid="ignore"):
+        cosd = np.cos(theta) * np.cos(theta_behind) + np.sin(theta) * np.sin(theta_behind) * np.cos(
+            phi - np.pi
+        )
+        d = np.arccos(np.clip(cosd, -1.0, 1.0))
+        w = alpha * np.exp(-(d**2) / (2 * sigma**2))
+    return np.nan_to_num(w, nan=0.0)
+
+
 def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
     """Escape angles (theta, phi) per pixel from a run's arrays; NaN where the ray did not escape.
 
@@ -151,6 +188,11 @@ def compose_rgb(
         return np.where(failed[..., None], RED, rgb)
 
     sky = sky_rgb(theta, phi, spec)
+    if spec.light_source:
+        w = light_weight(
+            theta, phi, np.pi - spec.theta_obs, spec.light_radius_deg, spec.light_alpha
+        )[..., None]
+        sky = w * WHITE + (1 - w) * sky
     if spec.grid:
         sky = np.where(
             grid_mask(theta, phi, spec.step_deg, spec.width_deg)[..., None], GRID_COLOR, sky

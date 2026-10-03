@@ -99,6 +99,62 @@ def test_grid_drawn_black_over_sky():
     assert np.array_equal(rgb[0, 0], v.GRID_COLOR)
 
 
+def test_light_weight_peak_and_falloff():
+    tb = np.pi - HALF_PI
+    peak = v.light_weight(np.array(tb), np.array(np.pi), tb, 10.0, 0.7)
+    assert peak == pytest.approx(0.7)
+    far = v.light_weight(np.array(tb + np.pi / 2), np.array(np.pi), tb, 10.0, 0.7)
+    assert far < 1e-3
+    ds = np.deg2rad([0, 5, 10, 20, 40])
+    w = v.light_weight(HALF_PI + ds, np.full(5, np.pi), HALF_PI, 10.0, 0.7)
+    assert np.all(np.diff(w) < 0)
+
+
+def test_light_weight_nan_is_zero_without_warning(recwarn):
+    nan = np.array([np.nan, 1.0])
+    w = v.light_weight(nan, nan[::-1], HALF_PI, 10.0, 0.7)
+    assert np.array_equal(w, [0.0, 0.0]) and not recwarn.list
+
+
+def test_light_source_off_is_unchanged():
+    args = (np.zeros((2, 2), int), full(1.0, 2), full(2.0, 2))
+    base = v.compose_rgb(*args, spec(background="two_color"))
+    off = v.compose_rgb(*args, spec(background="two_color", light_source=False))
+    assert np.array_equal(base, off)
+
+
+def test_light_blends_white_over_sky_and_grid_stays_on_top():
+    tb = np.pi - HALF_PI
+    st = np.zeros((2, 2), int)
+    rgb = v.compose_rgb(
+        st, np.full((2, 2), tb), full(np.pi, 2), spec(background="two_color", light_source=True)
+    )
+    assert np.allclose(rgb[0, 0], 0.7 * v.WHITE + 0.3 * v.BLUE)
+    theta = np.full((2, 2), np.deg2rad(90.0))  # on a theta grid line, at the glow centre
+    rgb = v.compose_rgb(
+        st, theta, full(np.pi, 2), spec(background="two_color", light_source=True, grid=True)
+    )
+    assert np.array_equal(rgb[0, 0], v.GRID_COLOR)
+
+
+def test_light_theta_obs_moves_peak():
+    ob = np.deg2rad(60.0)
+    s = spec(background="two_color", light_source=True, theta_obs=ob)
+    th = np.array([[np.deg2rad(120.0), np.deg2rad(60.0)]])
+    rgb = v.compose_rgb(np.zeros((1, 2), int), th, np.full((1, 2), np.pi), s)
+    assert np.allclose(rgb[0, 0], 0.7 * v.WHITE + 0.3 * v.BLUE)
+    assert not np.allclose(rgb[0, 1], 0.7 * v.WHITE + 0.3 * v.RED)
+
+
+def test_from_config_theta_obs_weyl():
+    from shadow_config import ShadowConfig
+
+    cfg = ShadowConfig(MD=0.1)
+    assert v.VisualSpec.from_config(cfg).theta_obs == pytest.approx(HALF_PI)
+    kerr = ShadowConfig(a=0.9, theta0=60.0)
+    assert v.VisualSpec.from_config(kerr).theta_obs == pytest.approx(np.deg2rad(60.0))
+
+
 def test_image_sampling_from_synthetic_png(tmp_path):
     import matplotlib.pyplot as plt
 
