@@ -21,7 +21,7 @@ Details:
   [docs/GPU.md](docs/GPU.md).
 - **Entry points:** `uv run bh-shadow <config.toml>` traces and plots one case. `uv run bh-matrix`
   builds a lambda table (the runner also builds it when it is missing).
-- **Run outputs:** each run dir holds one `outputs.npz` with the keys `status`, `coord1`, `coord2` (and `phi` for Kerr). Load it with `np.load`. There are no `.txt` outputs.
+- **Run outputs:** each run dir holds one `outputs.npz` with the keys `status`, `coord1`, `coord2` and `phi` (the traced escape azimuth, for Kerr and Weyl; the observer sits at phi = 0). Load it with `np.load`. There are no `.txt` outputs.
 - **Matrix build on GPU:** not supported. The quadrature path uses scalar adaptive `scipy.quad`, which does not port to MLX. The analytic path (MD == 0) takes milliseconds. The GPU path only reads the matrix.
 - **Host requirements:** `uv` only. numba compiles on the first run of a script.
 
@@ -110,8 +110,10 @@ presets exist, from `black_white` to `quadrant`, which gives one colour per lens
 
 The config runner can also colour the final image from the ray outcome, with `[plot] background`
 (`palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image`) and an optional
-celestial-sphere `grid`. This is a post-process on the traced arrays and adds no tracing cost. The
-Weyl backend has no traced phi, so left/right and grid phi lines use a flat-sky approximation. Keys
+celestial-sphere `grid`. This is a post-process on the traced arrays and adds no tracing cost. Weyl traces phi like Kerr; a legacy Weyl `outputs.npz` without `phi` falls back to a flat-sky
+phi from the pixel column. `[plot] grid_mode` is `"theta"` (default: theta/phi lines) or `"end_z"`
+(Weyl only: lines at fixed end-z values and phi multiples) or `"flat_angle"` (Weyl only: horizontal and
+vertical lines of equal width that are straight without a black hole and bend with it).
 `light_source = true` adds a white glow behind the black hole (two_color/four_color), which lenses into a bright ring. Keys
 are in [SCHEMA.md](docs/SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
 

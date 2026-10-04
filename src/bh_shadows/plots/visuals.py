@@ -3,8 +3,9 @@
 Post-process only: it reads the arrays the tracers already return (no extra tracing). Pure numpy
 except `render_image` and `load_sky_image` (matplotlib). `status` is 0 escaped, 1 captured,
 2 disk, 3 failed. Escape angles `theta` in [0, pi], `phi` in [0, 2*pi) come from `sky_directions`:
-Kerr uses `coord2` and `phi`; Weyl has no phi, so theta = pi - atan2(rho, z) (rows are
-z-mirrored) and phi is a flat-sky approximation from the pixel column (beta).
+Kerr uses `coord2` and `phi`; Weyl uses theta = pi - atan2(rho, z) (rows are z-mirrored) and the
+traced `phi`. A legacy Weyl npz without `phi` falls back to a flat-sky phi from the pixel column
+(beta).
 Disk pixels have no direction behind the disk, so they blend
 `disk_alpha * white` over the fixed neutral `DISK_BACKDROP`.
 
@@ -20,6 +21,7 @@ lower-left yellow, lower-right blue. "Upper" is theta < pi/2; left/right is the 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,6 +30,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from bh_shadows.runner.shadow_config import ShadowConfig
+
+log = logging.getLogger(__name__)
 
 # Sign of phi_rel that means "left" in the image (fixed empirically against real runs).
 PHI_LEFT_SIGN = 1
@@ -44,6 +48,17 @@ DISK_BACKDROP = np.array([0.25, 0.25, 0.25])  # colour behind a semi-transparent
 
 _TWO_PI = 2 * np.pi
 
+# `grid_mode = "end_z"` (Weyl): z lines every Z_LINE_SPACING end-z units from Z_LINE_TOP, half
+# width END_Z_DZ; phi lines have half width END_Z_DANG (rad).
+Z_LINE_TOP = 30.0
+Z_LINE_SPACING = 60.0 / 18.0
+END_Z_DZ = 0.06
+END_Z_DANG = 0.01
+
+# `grid_mode = "flat_angle"` (Weyl): lines on the flat-space angles (alpha_e, beta_e) of the ray end
+# point, same half width (rad) in both directions: 1.5 * (half the central end-z phi line width).
+FLAT_ANGLE_HALF_WIDTH = 1.5 * 0.0123 / 4
+
 
 @dataclass(frozen=True)
 class VisualSpec:
@@ -59,6 +74,8 @@ class VisualSpec:
     light_alpha: float = 0.7
     light_radius_deg: float = 10.0
     theta_obs: float = np.pi / 2  # observer polar angle (rad)
+    grid_mode: str = "theta"
+    distance: float = 15.0
 
     @classmethod
     def from_config(cls, cfg) -> VisualSpec:
@@ -80,6 +97,8 @@ class VisualSpec:
             grid=cfg.grid,
             step_deg=cfg.grid_step_deg,
             width_deg=cfg.grid_width_deg,
+            grid_mode=cfg.grid_mode,
+            distance=cfg.distance,
             disk_alpha=cfg.disk_alpha,
             sky=sky,
             light_source=cfg.light_source,
@@ -201,6 +220,96 @@ def grid_mask(theta: np.ndarray, phi: np.ndarray, step_deg: float, width_deg: fl
         return (dth <= w) | (dph * np.sin(theta) <= w)
 
 
+def grid_mask_end_z(z_end: np.ndarray, phi: np.ndarray, step_deg: float) -> np.ndarray:
+    """Return the mask of the Weyl end-z grid lines.
+
+    A z line is on `|z_end - (Z_LINE_TOP - k*Z_LINE_SPACING)| <= END_Z_DZ` for k = 0..18. A phi
+    line is on `|phi - k*step| <= END_Z_DANG`.
+
+    Parameters
+    ----------
+    z_end : np.ndarray
+        End z of each ray (`coord2`).
+    phi : np.ndarray
+        Escape azimuth in radians.
+    step_deg : float
+        Phi line spacing in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        True on a grid line. NaN inputs give False.
+    """
+    z_end = np.asarray(z_end, dtype=float)
+    step = np.deg2rad(step_deg)
+    with np.errstate(invalid="ignore"):
+        k = np.clip(np.round((Z_LINE_TOP - z_end) / Z_LINE_SPACING), 0, 18)
+        dz = np.abs(z_end - (Z_LINE_TOP - k * Z_LINE_SPACING))
+        pr = np.asarray(phi, dtype=float) / step
+        dph = np.abs(pr - np.round(pr)) * step
+        return (dz <= END_Z_DZ) | (dph <= END_Z_DANG)
+
+
+def flat_end_angles(
+    rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the flat-space pixel angles that would reach each ray end point.
+
+    The end point `(rho, phi, -z)` is joined to the observer at `x = distance` by a straight line.
+    The angles of that line (sign convention of the traced runs) are `alpha_e`, `beta_e`. Without
+    a black hole they equal the pixel angles, so lines of constant `alpha_e` or `beta_e` are
+    straight; the black hole bends them.
+
+    Parameters
+    ----------
+    rho_end, z_end, phi : np.ndarray
+        End rho, end z and end phi of each ray (`coord1`, `coord2`, `phi`).
+    distance : float
+        Observer distance.
+
+    Returns
+    -------
+    alpha_e, beta_e : np.ndarray
+        Angles in radians. NaN inputs give NaN.
+    """
+    rho_end = np.asarray(rho_end, dtype=float)
+    dx = rho_end * np.cos(phi) - distance
+    dy = rho_end * np.sin(phi)
+    dz = -np.asarray(z_end, dtype=float)
+    norm = np.sqrt(dx**2 + dy**2 + dz**2)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.arcsin(dz / norm), np.arctan2(-dy, -dx)
+
+
+def grid_mask_flat_angle(
+    rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float, step_deg: float
+) -> np.ndarray:
+    """Return the mask of the lensed flat-angle grid lines.
+
+    Lines are at `alpha_e = k*step` and `beta_e = k*step` (see `flat_end_angles`), both with half
+    width `FLAT_ANGLE_HALF_WIDTH`. They are straight without a black hole and bend with it.
+
+    Parameters
+    ----------
+    rho_end, z_end, phi : np.ndarray
+        End rho, end z and end phi of each ray.
+    distance : float
+        Observer distance.
+    step_deg : float
+        Line spacing in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        True on a grid line. NaN inputs give False.
+    """
+    step = np.deg2rad(step_deg)
+    ae, be = flat_end_angles(rho_end, z_end, phi, distance)
+    with np.errstate(invalid="ignore"):
+        on = lambda x: np.abs(x - np.round(x / step) * step) <= FLAT_ANGLE_HALF_WIDTH  # noqa: E731
+        return on(ae) | on(be)
+
+
 def light_weight(
     theta: np.ndarray, phi: np.ndarray, theta_behind: float, radius_deg: float, alpha: float
 ) -> np.ndarray:
@@ -240,13 +349,14 @@ def light_weight(
 def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
     """Return the escape angles of each pixel.
 
-    Kerr uses `theta = coord2` and the traced `phi`. Weyl uses `theta = pi - atan2(rho, z)`. Weyl
-    does not trace phi, so the function uses the flat-sky value `pi + PHI_LEFT_SIGN * beta`.
+    Kerr uses `theta = coord2` and the traced `phi`. Weyl uses `theta = pi - atan2(rho, z)` and the
+    traced `phi`. A legacy Weyl dict without `phi` uses the flat-sky value
+    `pi + PHI_LEFT_SIGN * beta` and the function logs a warning.
 
     Parameters
     ----------
     out : dict of str to np.ndarray
-        Run arrays (`status`, `coord1`, `coord2`, and `phi` for Kerr).
+        Run arrays (`status`, `coord1`, `coord2`, and `phi`).
     cfg : ShadowConfig
         Run config. Uses `half_angle`.
 
@@ -256,18 +366,27 @@ def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.nd
         Escape angles. NaN where the ray did not escape.
     """
     esc = np.asarray(out["status"]) == 0
-    if "phi" in out:
+    if cfg.backend == "kerr":
         theta, phi = np.asarray(out["coord2"], float), np.asarray(out["phi"], float)
     else:
         # _mirror4 negates z on the lower array rows (drawn at the image top), so flip theta
         theta = np.pi - np.arctan2(out["coord1"], out["coord2"])
+        if "phi" in out:
+            phi = np.asarray(out["phi"], float)
+            return np.where(esc, theta, np.nan), np.where(esc, np.mod(phi, _TWO_PI), np.nan)
+        log.warning("Weyl output has no traced phi (legacy npz): using flat-sky phi")
         beta = np.linspace(cfg.half_angle, -cfg.half_angle, esc.shape[1])
         phi = np.broadcast_to(np.pi + PHI_LEFT_SIGN * beta, esc.shape)
     return np.where(esc, theta, np.nan), np.where(esc, np.mod(phi, _TWO_PI), np.nan)
 
 
 def compose_rgb(
-    status: np.ndarray, theta: np.ndarray, phi: np.ndarray, spec: VisualSpec
+    status: np.ndarray,
+    theta: np.ndarray,
+    phi: np.ndarray,
+    spec: VisualSpec,
+    z_end: np.ndarray | None = None,
+    rho_end: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compose the RGB image.
 
@@ -283,6 +402,10 @@ def compose_rgb(
         Escape angles from `sky_directions`.
     spec : VisualSpec
         Visual options.
+    z_end : np.ndarray, optional
+        End z of each ray. Needed when `spec.grid_mode` is `end_z` or `flat_angle`.
+    rho_end : np.ndarray, optional
+        End rho of each ray. Needed when `spec.grid_mode == "flat_angle"`.
 
     Returns
     -------
@@ -303,9 +426,17 @@ def compose_rgb(
         )[..., None]
         sky = w * WHITE + (1 - w) * sky
     if spec.grid:
-        sky = np.where(
-            grid_mask(theta, phi, spec.step_deg, spec.width_deg)[..., None], GRID_COLOR, sky
-        )
+        if spec.grid_mode == "flat_angle":
+            if z_end is None or rho_end is None:
+                raise ValueError("grid_mode 'flat_angle' needs rho_end and z_end")
+            mask = grid_mask_flat_angle(rho_end, z_end, phi, spec.distance, spec.step_deg)
+        elif spec.grid_mode == "end_z":
+            if z_end is None:
+                raise ValueError("grid_mode 'end_z' needs z_end")
+            mask = grid_mask_end_z(z_end, phi, spec.step_deg)
+        else:
+            mask = grid_mask(theta, phi, spec.step_deg, spec.width_deg)
+        sky = np.where(mask[..., None], GRID_COLOR, sky)
     if spec.background == "greyscale":
         disk_rgb = WHITE
     else:
@@ -337,7 +468,7 @@ def render_image(
     spec = VisualSpec.from_config(cfg)
     status = out["status"]
     theta, phi = sky_directions(out, cfg)
-    rgb = compose_rgb(status, theta, phi, spec)
+    rgb = compose_rgb(status, theta, phi, spec, z_end=out.get("coord2"), rho_end=out.get("coord1"))
     h = cfg.half_angle
     fig = plt.figure(figsize=(10, 10))
     plt.imshow(rgb, origin="lower", extent=(-h, h, -h, h))

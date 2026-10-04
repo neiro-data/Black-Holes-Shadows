@@ -192,6 +192,11 @@ def test_load_sky_image_greyscale_and_alpha(tmp_path):
 def test_sky_directions_kerr_and_weyl():
     class Cfg:
         half_angle = 0.5
+        backend = "kerr"
+
+    class WeylCfg:
+        half_angle = 0.5
+        backend = "weyl"
 
     status = np.array([[0, 1], [0, 0]])
     kerr = {
@@ -204,9 +209,53 @@ def test_sky_directions_kerr_and_weyl():
     assert np.isnan(th[0, 1]) and th[0, 0] == 1.0
     assert np.isclose(ph[0, 0], 7.0 - 2 * np.pi)
     weyl = {"status": status, "coord1": full(1.0, 2), "coord2": full(1.0, 2)}
-    th, ph = v.sky_directions(weyl, Cfg)
+    th, ph = v.sky_directions(weyl, WeylCfg)  # legacy dict without phi: flat-sky fallback
     assert np.isclose(th[0, 0], np.pi - np.pi / 4) and np.isnan(ph[0, 1])
     assert 0 <= ph[0, 0] < 2 * np.pi
+    traced = weyl | {"phi": full(7.0, 2)}
+    th, ph = v.sky_directions(traced, WeylCfg)
+    assert np.isclose(th[0, 0], np.pi - np.pi / 4)
+    assert np.isclose(ph[0, 0], 7.0 - 2 * np.pi)
+
+
+def test_grid_mask_end_z_hits_lines_and_misses_mid_cells():
+    step = 10.0
+    ks = np.arange(19)
+    on = 30.0 - ks * 60.0 / 18.0
+    mid = on[:-1] - 0.5 * 60.0 / 18.0
+    phi_mid = np.full(len(on), np.deg2rad(35.0))
+    assert v.grid_mask_end_z(on, phi_mid, step).all()
+    assert not v.grid_mask_end_z(mid, phi_mid[:-1], step).any()
+    z_mid = np.full(3, mid[0])
+    phi_on = np.deg2rad([0.0, 30.0, 180.0])
+    assert v.grid_mask_end_z(z_mid, phi_on, step).all()
+    assert not v.grid_mask_end_z(np.array([np.nan]), np.array([np.nan]), step).any()
+
+
+def test_flat_end_angles_recover_pixel_angles():
+    d, R = 15.0, 30.0
+    a, b = np.meshgrid(np.linspace(-0.5, 0.5, 9), np.linspace(-0.5, 0.5, 9), indexing="ij")
+    ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
+    t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R**2)
+    x, y, z = d + t * ux, t * uy, t * uz
+    ae, be = v.flat_end_angles(np.hypot(x, y), -z, np.arctan2(y, x), d)
+    np.testing.assert_allclose(ae, a, atol=1e-12)
+    np.testing.assert_allclose(be, b, atol=1e-12)
+    step = 10.0
+    m = v.grid_mask_flat_angle(np.hypot(x, y), -z, np.arctan2(y, x), d, step)
+    assert m[np.abs(a) <= v.FLAT_ANGLE_HALF_WIDTH].all()  # alpha = 0 line is a full row band
+    assert not v.grid_mask_flat_angle(*(np.array([np.nan]),) * 3, d, step).any()
+
+
+def test_compose_rgb_end_z_needs_z_end():
+    st = np.zeros((2, 2), int)
+    ang = np.full((2, 2), 1.0)
+    sp = spec(background="four_color", grid=True, grid_mode="end_z")
+    with pytest.raises(ValueError, match="z_end"):
+        v.compose_rgb(st, ang, ang, sp)
+    z = np.full((2, 2), 30.0)
+    rgb = v.compose_rgb(st, ang, ang, sp, z_end=z)
+    assert (rgb == v.GRID_COLOR).all()
 
 
 @pytest.mark.parametrize("bg", ["black_hole", "two_color", "greyscale", "four_color"])

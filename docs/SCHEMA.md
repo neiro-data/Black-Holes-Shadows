@@ -46,6 +46,7 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 | `grid` | bool | `false` | celestial-sphere lines; an error with `palette` and `black_hole` |
 | `grid_step_deg` | float | `10.0` | 0 < x <= 90 |
 | `grid_width_deg` | float | `0.4` | 0 < x < step/2 |
+| `grid_mode` | str | `"theta"` | `theta`, `end_z` (Weyl only) or `flat_angle` (Weyl only: lines straight in flat space, bent by the black hole); needs `grid = true` |
 | `disk_alpha` | float | `0.6` | 0 to 1; disk opacity for `two_color`, `four_color`, `image` |
 | `light_source` | bool | `false` | white glow behind the black hole; only with `two_color`, `four_color` |
 | `light_alpha` | float | `0.7` | 0 to 1; glow peak opacity |

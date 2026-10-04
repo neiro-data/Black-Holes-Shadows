@@ -215,7 +215,7 @@ def test_weyl_geo_rhs_matches_cpu(MD, tmp_path, monkeypatch):
     _frozen_or_skip(lam)
     rho0, z0, al, be = 15.0, 0.0, 0.1, 0.2
     states = np.array(
-        [[r, 0.05 * (-1) ** i, z, 0.02 * (i % 3 - 1)] for i, (r, z) in enumerate(WEYL_POINTS)]
+        [[r, 0.05 * (-1) ** i, z, 0.02 * (i % 3 - 1), 0.0] for i, (r, z) in enumerate(WEYL_POINTS)]
     )
     gpu = wg.geo_gpu(states, rho0, z0, M, MD, b, al, be, lam)
     cpu = np.array([wc.geo(0.0, s, M, al, be, rho0, z0, MD, b, 1e-6) for s in states])
@@ -231,8 +231,9 @@ def test_weyl_gpu_smoke(MD, tmp_path, monkeypatch):
     rho0 = wc.solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0)
     h = np.deg2rad(20.0)
     alpha, beta = np.linspace(-h, 0, 8), np.linspace(h, 0, 8)
-    Mat, Mz, st = wg.f_paral_gpu(rho0, 0.0, M, MD, b, alpha, beta, MD > 0, lam)
-    assert Mat.shape == Mz.shape == st.shape == (8, 8)
+    Mat, Mz, Mphi, st = wg.f_paral_gpu(rho0, 0.0, M, MD, b, alpha, beta, MD > 0, lam)
+    assert Mat.shape == Mz.shape == Mphi.shape == st.shape == (8, 8)
+    assert np.isfinite(Mphi[st == 0]).all()
     assert set(np.unique(st)) <= {0, 3}
     assert np.isfinite(Mat[st == 0]).all() and np.isfinite(Mz[st == 0]).all()
 
@@ -274,12 +275,12 @@ def test_weyl_gpu_fallback_retraces_status3(tmp_path, monkeypatch):
     flagged = [(0, 1), (2, 3), (7, 7), (4, 0)]
 
     def stub(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
-        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, rs.HDER, disk_visible)
+        Mat, Mz, Mphi = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, rs.HDER, disk_visible)
         st = np.zeros(Mat.shape, dtype=np.int64)
         for i, j in flagged:
             if i < len(alpha):
-                Mat[i, j], Mz[i, j], st[i, j] = -123.0, 456.0, 3
-        return Mat, Mz, st
+                Mat[i, j], Mz[i, j], Mphi[i, j], st[i, j] = -123.0, 456.0, -9.0, 3
+        return Mat, Mz, Mphi, st
 
     monkeypatch.setattr(rs, "resolve_device", lambda opt, parallel=True: "gpu")
     monkeypatch.setattr(wg, "f_paral_gpu", stub)
@@ -328,7 +329,7 @@ def test_weyl_gpu_agrees_with_cpu(cfg_file, tmp_path, monkeypatch):
     assert mism.sum() <= 0.01 * sc_.size
     assert not (mism & ~_near_status_change(sc_)).any()
     both_escape = (sc_ == 0) & (sg == 0)
-    for k in ("coord1", "coord2"):
+    for k in ("coord1", "coord2", "phi"):
         assert np.median(np.abs(cpu[k][both_escape] - gpu[k][both_escape])) < 1e-3
     both_disk = (sc_ == 2) & (sg == 2)
     # The seeded MD=0 table makes this a CPU-vs-GPU test, not a physics test (real table: H7).

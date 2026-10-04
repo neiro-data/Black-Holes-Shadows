@@ -59,6 +59,7 @@ class ShadowConfig:
     grid: bool = False
     grid_step_deg: float = 10.0
     grid_width_deg: float = 0.4
+    grid_mode: str = "theta"
     disk_alpha: float = 0.6
     light_source: bool = False
     light_alpha: float = 0.7
@@ -120,6 +121,8 @@ class ShadowConfig:
             raise ValueError(
                 f"grid_width_deg must satisfy 0 < x < step/2, got {self.grid_width_deg}"
             )
+        if self.grid_mode not in ("theta", "end_z", "flat_angle"):
+            raise ValueError(f"grid_mode must be theta|end_z|flat_angle, got {self.grid_mode!r}")
         if not 0 <= self.disk_alpha <= 1:
             raise ValueError(f"disk_alpha must satisfy 0 <= x <= 1, got {self.disk_alpha}")
         if self.light_source and self.background not in ("two_color", "four_color"):
@@ -139,6 +142,8 @@ class ShadowConfig:
             raise ValueError("backend 'kerr' requires MD == 0")
         if self.backend == "kerr" and self.disk_visible:
             raise ValueError("the Kerr backend has no disk (disk_visible must be false)")
+        if self.grid and self.grid_mode != "theta" and self.backend == "kerr":
+            raise ValueError(f"grid_mode {self.grid_mode!r} is Weyl-only (Kerr has no end rho/z)")
 
     @property
     def backend(self) -> str:
@@ -211,6 +216,7 @@ class ShadowConfig:
             "image_path": self.image_path or None,
             "grid_step_deg": self.grid_step_deg,
             "grid_width_deg": self.grid_width_deg,
+            "grid_mode": self.grid_mode,
             "disk_alpha": self.disk_alpha,
             "light_source": self.light_source,
             "light_alpha": self.light_alpha,
@@ -267,6 +273,7 @@ class ShadowConfig:
             "grid",
             "grid_step_deg",
             "grid_width_deg",
+            "grid_mode",
             "disk_alpha",
             "light_source",
             "light_alpha",
@@ -303,7 +310,8 @@ class ShadowConfig:
             f'[matrix]\nn_grid = {d["n_grid"]}\nsource = "{d["source_opt"]}"\n\n'
             f'[plot]\npalette = "{d["palette"]}"\nbackground = "{d["background"]}"\n'
             f"grid = {str(d['grid']).lower()}\ngrid_step_deg = {d['grid_step_deg']}\n"
-            f"grid_width_deg = {d['grid_width_deg']}\ndisk_alpha = {d['disk_alpha']}\n"
+            f'grid_width_deg = {d["grid_width_deg"]}\ngrid_mode = "{d["grid_mode"]}"\n'
+            f"disk_alpha = {d['disk_alpha']}\n"
             f"light_source = {str(d['light_source']).lower()}\n"
             f"light_alpha = {d['light_alpha']}\nlight_radius_deg = {d['light_radius_deg']}\n"
             f"image = {json.dumps(d['image_path'])}\n"
