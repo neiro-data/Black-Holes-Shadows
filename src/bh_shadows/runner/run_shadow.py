@@ -142,7 +142,12 @@ def _chunked_rows(
     return tuple(np.concatenate(cols, axis=0) for cols in zip(*parts, strict=True))
 
 
-def _mirror4(q: np.ndarray, sign_flip_lower: bool = False) -> np.ndarray:
+def _mirror4(
+    q: np.ndarray,
+    sign_flip_lower: bool = False,
+    phi_flip_right: bool = False,
+    phi0: float = 0.0,
+) -> np.ndarray:
     """Mirror one quadrant into the full image.
 
     Parameters
@@ -151,6 +156,11 @@ def _mirror4(q: np.ndarray, sign_flip_lower: bool = False) -> np.ndarray:
         Quadrant array.
     sign_flip_lower : bool, optional
         Change the sign of the lower half (use it for z).
+    phi_flip_right : bool, optional
+        Reflect phi about `phi0` on the right half (use it for phi: the beta mirror maps
+        `phi - phi0` to `-(phi - phi0)`; the alpha mirror keeps phi).
+    phi0 : float, optional
+        Observer phi.
 
     Returns
     -------
@@ -160,6 +170,8 @@ def _mirror4(q: np.ndarray, sign_flip_lower: bool = False) -> np.ndarray:
     full = mirror_quadrants(q)
     if sign_flip_lower:
         full[q.shape[0] :, :] *= -1
+    if phi_flip_right:
+        full[:, q.shape[1] :] = phi0 - (full[:, q.shape[1] :] - phi0)
     return full
 
 
@@ -183,7 +195,7 @@ def _trace_weyl(
     Returns
     -------
     dict of str to np.ndarray
-        `status`, `coord1` (rho) and `coord2` (z), each of shape (n, n).
+        `status`, `coord1` (rho), `coord2` (z) and `phi`, each of shape (n, n).
     """
     log.info(
         "weyl run: lambda matrix %s",
@@ -220,7 +232,7 @@ def _trace_weyl(
                     rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[s:e], beta, HDER, cfg.disk_visible
                 )
 
-        Mat, Mz, *gpu_st = _chunked_rows(
+        Mat, Mz, Mphi, *gpu_st = _chunked_rows(
             tracer,
             half,
             progress=progress,
@@ -234,13 +246,13 @@ def _trace_weyl(
             t_re = time.perf_counter()
             if fail.any():
                 ii, jj = np.nonzero(fail)
-                Mat[ii, jj], Mz[ii, jj] = wc.retrace_points(
+                Mat[ii, jj], Mz[ii, jj], Mphi[ii, jj] = wc.retrace_points(
                     rho0, z0, cfg.M, cfg.MD, cfg.b, alpha, beta, ii, jj, HDER, cfg.disk_visible
                 )
             RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
-        Mat, Mz = np.zeros((half, half)), np.zeros((half, half))
+        Mat, Mz, Mphi = (np.zeros((half, half)) for _ in range(3))
         for i in tqdm(range(half), unit="row", desc="weyl", disable=not progress):
             for j in range(half):
                 y = np.array(
@@ -249,9 +261,10 @@ def _trace_weyl(
                         wc.dr(rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[i], beta[j]),
                         z0,
                         wc.dthe(rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[i]),
+                        0.0,
                     ]
                 )
-                Mat[i, j], Mz[i, j] = wc.func(
+                Mat[i, j], Mz[i, j], Mphi[i, j] = wc.func(
                     y,
                     300.0,
                     -0.02,
@@ -272,6 +285,7 @@ def _trace_weyl(
         "status": _mirror4(status).astype(int),
         "coord1": _mirror4(Mat),
         "coord2": _mirror4(Mz, sign_flip_lower=True),
+        "phi": _mirror4(Mphi, phi_flip_right=True),
     }
 
 

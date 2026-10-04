@@ -123,7 +123,8 @@ def test_save_run_writes_npz(cfg_file):
     rs.save_run(cfg, out)
     npz = np.load(cfg.run_dir / "outputs.npz")
     assert {"status", "coord1", "coord2"} <= set(npz.files)
-    assert ("phi" in npz.files) == (cfg.backend == "kerr")
+    assert "phi" in npz.files
+    assert npz["phi"].shape == npz["status"].shape
     assert np.array_equal(npz["status"], out["status"])
     assert not list(cfg.run_dir.glob("*.txt"))
 
@@ -151,9 +152,10 @@ def test_retrace_points_matches_f_paral_weyl():
     alpha, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
     ii, jj = _random_pixels(n)
     for disk in (False, True):
-        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk)
-        rm, rz = wc.retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk)
-        assert np.array_equal(rm, Mat[ii, jj]) and np.array_equal(rz, Mz[ii, jj])
+        full = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk)
+        got = wc.retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk)
+        for f, g in zip(full, got, strict=True):
+            assert np.array_equal(f[ii, jj], g)
 
 
 def test_retrace_points_matches_f_paral_kerr():
@@ -167,3 +169,55 @@ def test_retrace_points_matches_f_paral_kerr():
     got = kc.retrace_points(r0, theta0, a, M, alpha, beta, ii, jj)
     for f, g in zip(full, got, strict=True):
         assert np.array_equal(f[ii, jj], g, equal_nan=True)
+
+
+def _weyl_full_phi(n=16):
+    """Trace the full (unmirrored) Weyl grid and return it with the config and the run output."""
+    cfg = sc.ShadowConfig.from_toml(
+        "configs/schwarzschild_nodisk.toml", {"n": n, "n_grid": 20, "show": False}
+    )
+    out = rs.trace_grid(cfg, progress=False)
+    rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=0.0, target_gpp_sqrt=cfg.distance)
+    alpha, beta = rs._angles(cfg)
+    full = wc.f_paral(rho0, 0.0, cfg.M, cfg.MD, cfg.b, alpha, beta, rs.HDER, cfg.disk_visible)
+    return cfg, out, full, beta
+
+
+def test_weyl_phi_finite_and_antisymmetric_in_beta():
+    cfg, out, (Mat, Mz, Mphi), beta = _weyl_full_phi(16)
+    esc = out["status"] == 0
+    assert esc.any() and np.isfinite(Mphi[esc]).all()
+    # beta -> -beta maps phi -> -phi (observer at phi0 = 0); mirrored output equals the full trace
+    np.testing.assert_allclose(Mphi[:, ::-1][esc], -Mphi[esc], atol=1e-8)
+    np.testing.assert_allclose(out["phi"][esc], Mphi[esc], atol=1e-8)
+
+
+def test_weyl_phi_zero_on_beta_zero_column():
+    cfg = sc.ShadowConfig.from_toml(
+        "configs/schwarzschild_nodisk.toml", {"n": 8, "n_grid": 20, "show": False}
+    )
+    rs.trace_grid(cfg, progress=False)  # loads the matrix
+    rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=0.0, target_gpp_sqrt=cfg.distance)
+    alpha = np.linspace(-0.3, 0.3, 8)
+    _, _, Mphi = wc.f_paral(rho0, 0.0, cfg.M, cfg.MD, cfg.b, alpha, np.array([0.0]), rs.HDER, False)
+    np.testing.assert_allclose(Mphi, 0.0, atol=1e-10)
+
+
+def test_weyl_phi_matches_kerr_a0():
+    base = {"n": 32, "n_grid": 20, "show": False}
+    weyl = rs.trace_grid(
+        sc.ShadowConfig.from_toml("configs/schwarzschild_nodisk.toml", base), progress=False
+    )
+    kerr = rs.trace_grid(
+        sc.ShadowConfig.from_toml(
+            "configs/kerr_a0.9_nodisk.toml", base | {"a": 0.0, "backend_opt": "kerr"}
+        ),
+        progress=False,
+    )
+    both = (weyl["status"] == 0) & (kerr["status"] == 0)
+    assert both.sum() > 100
+    # Both escape surfaces differ slightly (Weyl rho/z vs Boyer-Lindquist r), so compare loosely;
+    # rays that wind near the photon sphere differ most.
+    diff = np.abs(weyl["phi"][both] - kerr["phi"][both])
+    assert np.median(diff) < 1e-2
+    assert np.mean(diff < 2e-2) > 0.8

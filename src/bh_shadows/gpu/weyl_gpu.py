@@ -16,8 +16,9 @@ RKF45 `run_kut4_mod`, `func`). Differences from the CPU float64 path, forced by 
   steps and may loop past 500 retries). Non-finite state or an unmet tolerance -> status 3.
 
 The kernel returns the same `[rho, z]` sentinels as `weyl_core.func` (escape -> `[rho, z]`,
-capture -> `[0.001, 0.001]`, disk hit -> `[rho, z + 50]`), so `classify_shadow_disk` is shared with
-the CPU path. Status 3 pixels are re-traced on the CPU (float64) by the runner.
+capture -> `[0.001, 0.001]`, disk hit -> `[rho, z + 50]`) plus the traced `phi`, so
+`classify_shadow_disk` is shared with the CPU path. Status 3 pixels are re-traced on the CPU
+(float64) by the runner.
 """
 
 from __future__ import annotations
@@ -124,7 +125,7 @@ inline float esc_r(float rho, float z, thread const P& p) {{
   return R*exp(-0.5f*nu_val(R, 0.f, p));
 }}
 
-// RHS of the 4-state system [rho, drho, z, dz].
+// RHS of the 5-state system [rho, drho, z, dz, phi].
 inline void geo(thread const float* y, thread const P& p, thread float* out) {{
   float rho = y[0], z = y[2];
   float nu, nr, nz;
@@ -140,32 +141,34 @@ inline void geo(thread const float* y, thread const P& p, thread float* out) {{
   out[2] = y[3];
   out[3] = -(0.5f*e2*nz*dt*dt - 0.5f*(dl1 - nz)*y[1]*y[1] + (dl0 - nr)*y[1]*y[3]
              + 0.5f*(dl1 - nz)*y[3]*y[3] + 0.5f*em*rho*rho*nz*dph*dph);
+  out[4] = dph;
 }}
 
-// One RKF45 attempt of size h: fills y4 and returns ||y5 - y4||.
+// One RKF45 attempt of size h: fills y4 and returns ||y5 - y4|| over the first 4 components
+// (phi, the 5th, does not enter the step control, as on CPU).
 inline float rkf(thread const float* y, float h, thread const P& p, thread float* y4) {{
-  float K1[4], K2[4], K3[4], K4[4], K5[4], K6[4], t[4], f[4];
-  geo(y, p, f); for (int i = 0; i < 4; i++) K1[i] = h*f[i];
-  for (int i = 0; i < 4; i++) t[i] = y[i] + K1[i]/4;
-  geo(t, p, f); for (int i = 0; i < 4; i++) K2[i] = h*f[i];
-  for (int i = 0; i < 4; i++) t[i] = y[i] + 3.f/32*K1[i] + 9.f/32*K2[i];
-  geo(t, p, f); for (int i = 0; i < 4; i++) K3[i] = h*f[i];
-  for (int i = 0; i < 4; i++)
+  float K1[5], K2[5], K3[5], K4[5], K5[5], K6[5], t[5], f[5];
+  geo(y, p, f); for (int i = 0; i < 5; i++) K1[i] = h*f[i];
+  for (int i = 0; i < 5; i++) t[i] = y[i] + K1[i]/4;
+  geo(t, p, f); for (int i = 0; i < 5; i++) K2[i] = h*f[i];
+  for (int i = 0; i < 5; i++) t[i] = y[i] + 3.f/32*K1[i] + 9.f/32*K2[i];
+  geo(t, p, f); for (int i = 0; i < 5; i++) K3[i] = h*f[i];
+  for (int i = 0; i < 5; i++)
     t[i] = y[i] + 1932.f/2197*K1[i] - 7200.f/2197*K2[i] + 7296.f/2197*K3[i];
-  geo(t, p, f); for (int i = 0; i < 4; i++) K4[i] = h*f[i];
-  for (int i = 0; i < 4; i++)
+  geo(t, p, f); for (int i = 0; i < 5; i++) K4[i] = h*f[i];
+  for (int i = 0; i < 5; i++)
     t[i] = y[i] + 439.f/216*K1[i] - 8*K2[i] + 3680.f/513*K3[i] - 845.f/4104*K4[i];
-  geo(t, p, f); for (int i = 0; i < 4; i++) K5[i] = h*f[i];
-  for (int i = 0; i < 4; i++)
+  geo(t, p, f); for (int i = 0; i < 5; i++) K5[i] = h*f[i];
+  for (int i = 0; i < 5; i++)
     t[i] = y[i] - 8.f/27*K1[i] + 2*K2[i] - 3544.f/2565*K3[i] + 1859.f/4104*K4[i]
            - 11.f/40*K5[i];
-  geo(t, p, f); for (int i = 0; i < 4; i++) K6[i] = h*f[i];
+  geo(t, p, f); for (int i = 0; i < 5; i++) K6[i] = h*f[i];
   float e2 = 0;
-  for (int i = 0; i < 4; i++) {{
+  for (int i = 0; i < 5; i++) {{
     y4[i] = y[i] + 25.f/216*K1[i] + 1408.f/2565*K3[i] + 2197.f/4101*K4[i] - K5[i]/5;
     float y5 = y[i] + 16.f/135*K1[i] + 6656.f/12825*K3[i] + 28561.f/56430*K4[i]
                - 9.f/50*K5[i] + 2.f/55*K6[i];
-    e2 += (y5 - y4[i])*(y5 - y4[i]);
+    if (i < 4) e2 += (y5 - y4[i])*(y5 - y4[i]);
   }}
   return sqrt(e2);
 }}
@@ -185,6 +188,7 @@ inline void init_ray(float alpha, float beta, thread P& p, thread float* y) {{
   y[1] = cos(alpha)*cos(beta)/sqrt(p.grr0);
   y[2] = p.z0;
   y[3] = sin(alpha)/sqrt(p.gzz0);
+  y[4] = 0.f;
 }}
 """
 
@@ -195,7 +199,7 @@ uint total = (uint)alpha_shape[0]*nb;
 if (idx >= total) return;
 P p;
 load_p(prm, (int)lam_shape[0], (int)lam_shape[1], lam, p);
-float y[4];
+float y[5];
 init_ray(alpha[idx / nb], beta[idx % nb], p, y);
 float hmin = {HMIN_GPU!r}f, h = -0.02f;
 float orho = y[0], oz = y[2];
@@ -204,7 +208,7 @@ bool done = nu_val(y[0], y[2], p) <= -3.f || esc_r(y[0], y[2], p) >= 30.f;
 float zprev = y[2];
 for (int step = 0; !done; step++) {{
   if (step >= {MAX_STEPS}) {{ st = 3; break; }}
-  float y4[4];
+  float y4[5];
   float err = rkf(y, h, p, y4);
   float delta = pow(0.5f, 0.25f)*pow(TOL/err, 0.25f);
   int tries = 0;
@@ -224,15 +228,16 @@ for (int step = 0; !done; step++) {{
     else if (fabs(nh) > fabs(HMAX)) h = HMAX;
     else h = nh;
   }}
-  for (int i = 0; i < 4; i++) y[i] = y4[i];
+  for (int i = 0; i < 5; i++) y[i] = y4[i];
   orho = y[0]; oz = y[2];
-  if (!isfinite(y[0]) || !isfinite(y[1]) || !isfinite(y[2]) || !isfinite(y[3])) {{ st = 3; break; }}
+  if (!isfinite(y[0]) || !isfinite(y[1]) || !isfinite(y[2]) || !isfinite(y[3])
+      || !isfinite(y[4])) {{ st = 3; break; }}
   if (esc_r(y[0], y[2], p) >= 30.f) break;
   else if (nu_val(y[0], y[2], p) <= -3.f) {{ orho = 0.001f; oz = 0.001f; break; }}
   else if (p.vis != 0 && y[0] > p.b && sgn(y[2]) == -sgn(zprev)) {{ oz = y[2] + 50.f; break; }}
   zprev = y[2];
 }}
-out_rho[idx] = orho; out_z[idx] = oz; out_st[idx] = st;
+out_rho[idx] = orho; out_z[idx] = oz; out_phi[idx] = y[4]; out_st[idx] = st;
 """
 
 # Debug kernel: nu, lamb, d nu/d rho, d nu/d z at given (rho, z) points.
@@ -251,15 +256,15 @@ out_nu[idx] = nu; out_lam[idx] = lamb_(rho, z, p); out_nr[idx] = nr; out_nz[idx]
 # Debug kernel: the geodesic RHS at given states (validates `geo` against `weyl_core.geo`).
 _GEO = """
 uint idx = thread_position_in_grid.x;
-if (idx >= (uint)zin_shape[0]/4) return;
+if (idx >= (uint)zin_shape[0]/5) return;
 P p;
 load_p(prm, (int)lam_shape[0], (int)lam_shape[1], lam, p);
-float y0[4];
+float y0[5];
 init_ray(prm[10], prm[11], p, y0);
-float z[4], o[4];
-for (int i = 0; i < 4; i++) z[i] = zin[idx*4 + i];
+float z[5], o[5];
+for (int i = 0; i < 5; i++) z[i] = zin[idx*5 + i];
 geo(z, p, o);
-for (int i = 0; i < 4; i++) out[idx*4 + i] = o[i];
+for (int i = 0; i < 5; i++) out[idx*5 + i] = o[i];
 """
 
 
@@ -339,9 +344,9 @@ def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
 
     Returns
     -------
-    Mat, Mz : np.ndarray
-        End rho and end z, of shape (len(alpha), len(beta)). The sentinels are the same as in
-        `weyl_core.func`.
+    Mat, Mz, Mphi : np.ndarray
+        End rho, end z and end phi, of shape (len(alpha), len(beta)). The sentinels are the same
+        as in `weyl_core.func`; phi is the last traced value (observer at phi = 0).
     status : np.ndarray
         0 done, 3 failed in float32 (trace again on the CPU).
     """
@@ -358,13 +363,14 @@ def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
             "prm": np.array(_observer_prm(rho0, z0, M, MD, b, disk_visible)),
             "lam": lam,
         },
-        {"out_rho": np.float32, "out_z": np.float32, "out_st": np.int32},
+        {"out_rho": np.float32, "out_z": np.float32, "out_phi": np.float32, "out_st": np.int32},
         na * nb,
     )
     shape = (na, nb)
     return (
         res["out_rho"].astype(np.float64).reshape(shape),
         res["out_z"].astype(np.float64).reshape(shape),
+        res["out_phi"].astype(np.float64).reshape(shape),
         res["out_st"].astype(np.int64).reshape(shape),
     )
 
@@ -405,7 +411,7 @@ def geo_gpu(states, rho0, z0, M, MD, b, alpha, beta, lam):
     Parameters
     ----------
     states : array_like
-        States `[rho, drho, z, dz]` of shape (k, 4).
+        States `[rho, drho, z, dz, phi]` of shape (k, 5).
     rho0, z0 : float
         Observer position.
     M, MD, b : float
@@ -418,9 +424,9 @@ def geo_gpu(states, rho0, z0, M, MD, b, alpha, beta, lam):
     Returns
     -------
     np.ndarray
-        Derivatives of shape (k, 4).
+        Derivatives of shape (k, 5).
     """
-    states = np.asarray(states, dtype=np.float32).reshape(-1, 4)
+    states = np.asarray(states, dtype=np.float32).reshape(-1, 5)
     prm = np.array(_observer_prm(rho0, z0, M, MD, b, False) + [alpha, beta])
     res = gb.launch(
         "weyl_geo",
@@ -431,4 +437,4 @@ def geo_gpu(states, rho0, z0, M, MD, b, alpha, beta, lam):
         len(states),
         out_len=states.size,
     )
-    return res["out"].astype(np.float64).reshape(-1, 4)
+    return res["out"].astype(np.float64).reshape(-1, 5)

@@ -89,6 +89,7 @@ def test_plot_defaults_equal_legacy(tmp_path):
     assert cfg.background == "palette" and cfg.grid is False
     assert (cfg.grid_step_deg, cfg.grid_width_deg, cfg.disk_alpha) == (10.0, 0.4, 0.6)
     assert cfg.image_path == ""
+    assert cfg.grid_mode == "theta"
 
 
 @pytest.mark.parametrize(
@@ -105,6 +106,8 @@ def test_plot_defaults_equal_legacy(tmp_path):
         {"grid_step_deg": 91.0},
         {"grid_width_deg": 0.0},
         {"grid_step_deg": 10.0, "grid_width_deg": 5.0},
+        {"grid_mode": "nope"},
+        {"grid": True, "background": "four_color", "grid_mode": "end_z", "backend_opt": "kerr"},
     ],
 )
 def test_plot_validation_errors(tmp_path, ov):
@@ -187,3 +190,15 @@ def test_plot_to_toml_round_trip(tmp_path):
     back = ShadowConfig.from_toml(out, {"timestamp": "20260101_000000"})
     assert back == dataclasses.replace(cfg, name=cfg.run_name)  # to_toml pins the run name
     assert back.image_path == str(png.resolve())
+
+
+def test_grid_mode_end_z_roundtrip_and_weyl_only(tmp_path):
+    ov = {"grid": True, "background": "four_color", "grid_mode": "end_z"}
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov)
+    assert cfg.backend == "weyl" and cfg.grid_mode == "end_z"
+    again = tmp_path / "again.toml"
+    again.write_text(cfg.to_toml())
+    assert ShadowConfig.from_toml(again).grid_mode == "end_z"
+    assert cfg.to_metadata()["grid_mode"] == "end_z"
+    with pytest.raises(ValueError, match="Weyl-only"):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov | {"a": 0.5})

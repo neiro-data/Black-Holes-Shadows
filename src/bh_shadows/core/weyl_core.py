@@ -569,7 +569,8 @@ def run_kut4_mod(F, x, y, h, *args):
 
     The step control is the legacy one: `hmax = -0.04`, `hmin = -1e-7`, `tol = 1e-4`. The retry loop
     compares `h < hmin` on negative steps and can do more than 500 retries. Keep it as it is: the
-    CPU results depend on it.
+    CPU results depend on it. The error norm uses only the first 4 state components, so a traced
+    phi (5th component) does not change the step control.
 
     Parameters
     ----------
@@ -611,7 +612,7 @@ def run_kut4_mod(F, x, y, h, *args):
     y4 = y + 25 / 216 * K1 + 1408 / 2565 * K3 + 2197 / 4101 * K4 - K5 / 5
     y5 = y + 16 / 135 * K1 + 6656 / 12825 * K3 + 28561 / 56430 * K4 - 9 / 50 * K5 + 2 / 55 * K6
 
-    error = np.linalg.norm(y5 - y4)
+    error = np.linalg.norm((y5 - y4)[:4])
     delta = pow(1.0 / 2.0, (1.0 / 4.0)) * pow(tol / error, (1.0 / 4.0))
 
     if error < tol:
@@ -656,7 +657,7 @@ def run_kut4_mod(F, x, y, h, *args):
                 + 2 / 55 * K6
             )
 
-            error = np.linalg.norm(y5 - y4)
+            error = np.linalg.norm((y5 - y4)[:4])
             delta = pow(1.0 / 2.0, (1.0 / 4.0)) * pow(tol / error, (1.0 / 4.0))
 
             if error < tol:
@@ -679,11 +680,11 @@ def run_kut4_mod(F, x, y, h, *args):
 # ---------------------------------------------------------------------------
 # Geodesic RHS + single-ray tracers.
 #
-# State vector: [rho, drho, z, dz] (phi is not traced).
+# State vector: [rho, drho, z, dz, phi]. phi is traced but excluded from the step-error norm.
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def geo(t, z, M, alpha, beta, rho0, z0, MD, b, hder):
-    """Return the geodesic right-hand side for the state `[rho, drho, z, dz]`.
+    """Return the geodesic right-hand side for the state `[rho, drho, z, dz, phi]`.
 
     Parameters
     ----------
@@ -752,7 +753,9 @@ def geo(t, z, M, alpha, beta, rho0, z0, MD, b, hder):
         * dphi(z[0], z[2], M, MD, b, alpha, beta, pphi) ** 2
     )
 
-    return np.array([z[1], d2Rdt, z[3], d2Thedt])
+    dphidt = dphi(z[0], z[2], M, MD, b, alpha, beta, pphi)
+
+    return np.array([z[1], d2Rdt, z[3], d2Thedt, dphidt])
 
 
 @jit(nopython=True)
@@ -762,7 +765,7 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
     Parameters
     ----------
     y : np.ndarray
-        Initial state `[rho, drho, z, dz]`.
+        Initial state `[rho, drho, z, dz, phi]`.
     x : float
         Initial affine parameter.
     h : float
@@ -783,10 +786,11 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
     Returns
     -------
     list of float
-        End `[rho, z]`. Sentinels: capture gives `[0.001, 0.001]`, a disk hit gives `[rho, z + 50]`.
+        End `[rho, z, phi]`. Sentinels: capture gives `[0.001, 0.001, phi]`, a disk hit gives
+        `[rho, z + 50, phi]`. The phi value is the last traced one.
     """
     y_prev = y
-    yf = [y[0], y[2]]
+    yf = [y[0], y[2], y[4]]
 
     while (
         nu(y[0], y[2], M, MD, b, 2) > -3.0
@@ -795,15 +799,15 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
         (h, x, y) = run_kut4_mod(geo, x, y, h, M, alpha, beta, rho0, z0, MD, b, hder)
 
         if np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) >= 30.0:
-            yf = [y[0], y[2]]
+            yf = [y[0], y[2], y[4]]
             break
 
         elif nu(y[0], y[2], M, MD, b, 2) <= -3.0:
-            yf = [0.001, 0.001]
+            yf = [0.001, 0.001, y[4]]
             break
 
         elif disk_visible and y[0] > b and np.sign(y[2]) == -np.sign(y_prev[2]):
-            yf = [y[0], y[2] + 50.0]
+            yf = [y[0], y[2] + 50.0, y[4]]
             break
 
         y_prev = y
@@ -830,11 +834,13 @@ def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
 
     Returns
     -------
-    Mat, Mz : np.ndarray
-        End rho and end z, of shape (len(alpha), len(beta)). See `func` for the sentinels.
+    Mat, Mz, Mphi : np.ndarray
+        End rho, end z and end phi, of shape (len(alpha), len(beta)). The observer sits at phi = 0.
+        See `func` for the sentinels.
     """
     Mat = np.zeros((len(alpha), len(beta)))
     Mz = np.zeros((len(alpha), len(beta)))
+    Mphi = np.zeros((len(alpha), len(beta)))
 
     for i in prange(len(alpha)):
         for j in prange(len(beta)):
@@ -844,13 +850,14 @@ def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
                     dr(rho0, z0, M, MD, b, alpha[i], beta[j]),
                     z0,
                     dthe(rho0, z0, M, MD, b, alpha[i]),
+                    0.0,
                 ]
             )
-            (Mat[i, j], Mz[i, j]) = func(
+            (Mat[i, j], Mz[i, j], Mphi[i, j]) = func(
                 y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
             )
 
-    return (Mat, Mz)
+    return (Mat, Mz, Mphi)
 
 
 @jit(nopython=True, parallel=True)
@@ -874,12 +881,13 @@ def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=F
 
     Returns
     -------
-    Mat, Mz : np.ndarray
-        End rho and end z, of shape (k,).
+    Mat, Mz, Mphi : np.ndarray
+        End rho, end z and end phi, of shape (k,).
     """
     k = len(ii)
     Mat = np.zeros(k)
     Mz = np.zeros(k)
+    Mphi = np.zeros(k)
 
     for p in prange(k):
         i = ii[p]
@@ -890,10 +898,11 @@ def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=F
                 dr(rho0, z0, M, MD, b, alpha[i], beta[j]),
                 z0,
                 dthe(rho0, z0, M, MD, b, alpha[i]),
+                0.0,
             ]
         )
-        (Mat[p], Mz[p]) = func(
+        (Mat[p], Mz[p], Mphi[p]) = func(
             y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
         )
 
-    return (Mat, Mz)
+    return (Mat, Mz, Mphi)

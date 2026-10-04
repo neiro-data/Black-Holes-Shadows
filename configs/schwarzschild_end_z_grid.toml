@@ -1,0 +1,22 @@
+# Example: Schwarzschild (Weyl) with the end-z grid and traced phi.
+# Run: uv run bh-shadow configs/schwarzschild_end_z_grid.toml --n 2048
+name = "schwarzschild_end_z_grid"
+
+[spacetime]
+M  = 1.0
+a  = 0.0
+MD = 0.0
+b  = 6.0
+
+[observer]
+distance = 15.0
+
+[grid]
+n = 160
+
+[plot]
+palette = "grey_black_white"
+background = "four_color"
+grid = true
+grid_step_deg = 30.0
+grid_mode = "end_z"
