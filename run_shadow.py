@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 HDER = 10**-6
 CORE_FRACTION = 0.8
 RUN_STATS: dict = {}  # per-run device info from the last `trace_grid`, written to run.json
-GPU_CHUNK_ROWS = 16  # rows per kernel launch; keeps each dispatch under the GPU watchdog
+GPU_CHUNK_ROWS = 32  # rows per kernel launch; keeps each dispatch under the GPU watchdog (README)
 
 
 def limit_threads(fraction: float = CORE_FRACTION) -> int:
@@ -40,6 +40,16 @@ def limit_threads(fraction: float = CORE_FRACTION) -> int:
     n = max(1, min(int((os.cpu_count() or 1) * fraction), numba.config.NUMBA_NUM_THREADS))
     numba.set_num_threads(n)
     return n
+
+
+def _resolve_run_device(cfg: ShadowConfig) -> str:
+    """Validate `device_opt` always (even when serial); the serial path runs on the CPU."""
+    device = resolve_device(cfg.device_opt, cfg.parallel)
+    if not cfg.parallel:
+        if cfg.device_opt == "gpu":
+            log.warning("device_opt='gpu' ignored: parallel=false runs serially on the cpu")
+        return "cpu"
+    return device
 
 
 def _angles(cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
@@ -54,15 +64,26 @@ def _chunked_rows(
     progress: bool,
     desc: str,
     chunk: int | None = None,
+    record_dispatch: bool = False,
 ) -> tuple:
-    """Call `fn(start, stop)` over row chunks, updating a progress bar; concat along axis 0."""
+    """Call `fn(start, stop)` over row chunks, updating a progress bar; concat along axis 0.
+
+    With `record_dispatch`, per-call wall times go to `RUN_STATS` (GPU watchdog budget).
+    """
     chunk = max(1, chunk or numba.get_num_threads())
     parts = []
+    times = []
     with tqdm(total=n_rows, unit="row", desc=desc, disable=not progress) as pbar:
         for s in range(0, n_rows, chunk):
             e = min(s + chunk, n_rows)
+            t0 = time.perf_counter()
             parts.append(fn(s, e))
+            times.append(time.perf_counter() - t0)
             pbar.update(e - s)
+    if record_dispatch and times:
+        RUN_STATS["gpu_chunk_rows"] = chunk
+        RUN_STATS["gpu_dispatch_s_max"] = round(max(times), 4)
+        RUN_STATS["gpu_dispatch_s_mean"] = round(sum(times) / len(times), 4)
     return tuple(np.concatenate(cols, axis=0) for cols in zip(*parts, strict=True))
 
 
@@ -83,15 +104,17 @@ def _trace_weyl(
         if matrix_path(cfg.M, cfg.MD, cfg.b, cfg.n_grid).exists()
         else "not found, building now (may take a while for quadrature)",
     )
+    t_mat = time.perf_counter()
     mpath = ensure_matrix(cfg.M, cfg.MD, cfg.b, cfg.n_grid, cfg.matrix_source)
     wc.load_matrix(str(mpath))  # must precede the first trace
+    RUN_STATS["matrix_s"] = round(time.perf_counter() - t_mat, 3)
     z0 = 0.0
     rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=z0, target_gpp_sqrt=cfg.distance)
 
     alfa_f, beta_f = _angles(cfg)
     half = cfg.n // 2
     alfa, beta = alfa_f[:half], beta_f[:half]
-    device = resolve_device(cfg.device_opt, cfg.parallel) if cfg.parallel else "cpu"
+    device = _resolve_run_device(cfg)
     RUN_STATS["device"] = device
     if cfg.parallel:
         if device == "gpu":
@@ -114,23 +137,18 @@ def _trace_weyl(
             progress=progress,
             desc="weyl-gpu" if device == "gpu" else "weyl",
             chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
+            record_dispatch=device == "gpu",
         )
         if device == "gpu":  # float32 failures (status 3) are re-traced in float64 on the CPU
             fail = gpu_st[0] == 3
             RUN_STATS["gpu_cpu_fallback_pixels"] = int(fail.sum())
-            for i, j in zip(*np.nonzero(fail), strict=True):
-                y = np.array(
-                    [
-                        rho0,
-                        wc.dr(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i], beta[j]),
-                        z0,
-                        wc.dthe(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i]),
-                    ]
+            t_re = time.perf_counter()
+            if fail.any():
+                ii, jj = np.nonzero(fail)
+                Mat[ii, jj], Mz[ii, jj] = wc.retrace_points(
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa, beta, ii, jj, HDER, cfg.disk_visible
                 )
-                Mat[i, j], Mz[i, j] = wc.func(
-                    y, 300.0, -0.02, alfa[i], beta[j], cfg.M, rho0, z0, cfg.MD, cfg.b, HDER,
-                    cfg.disk_visible,
-                )  # fmt: skip
+            RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
         Mat, Mz = np.zeros((half, half)), np.zeros((half, half))
@@ -182,7 +200,7 @@ def _trace_kerr(
     mirror = cfg.theta0 == 90.0
     alfa_t = alfa[: cfg.n // 2] if mirror else alfa
 
-    device = resolve_device(cfg.device_opt, cfg.parallel) if cfg.parallel else "cpu"
+    device = _resolve_run_device(cfg)
     RUN_STATS["device"] = device
     if cfg.parallel:
         if device == "gpu":
@@ -197,24 +215,17 @@ def _trace_kerr(
             progress=progress,
             desc="kerr-gpu" if device == "gpu" else "kerr",
             chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
+            record_dispatch=device == "gpu",
         )
-        if device == "gpu":
-            RUN_STATS["gpu_cpu_fallback_pixels"] = 0
         if device == "gpu":  # float32 failures (status 3) are re-traced in float64 on the CPU
-            for i, j in zip(*np.nonzero(Mst == 3), strict=True):
-                y = np.array(
-                    [
-                        cfg.distance,
-                        kc.dr(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i], beta[j]),
-                        theta0,
-                        kc.dthe(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i]),
-                        0.0,
-                    ]
+            t_re = time.perf_counter()
+            ii, jj = np.nonzero(Mst == 3)
+            if len(ii):
+                Mr[ii, jj], Mth[ii, jj], Mphi[ii, jj], Mst[ii, jj] = kc.retrace_points(
+                    cfg.distance, theta0, cfg.a, cfg.M, alfa_t, beta, ii, jj
                 )
-                Mr[i, j], Mth[i, j], Mphi[i, j], Mst[i, j] = kc.func_status(
-                    y, 300.0, -0.02, alfa_t[i], beta[j], cfg.a, cfg.M, cfg.distance, theta0
-                )
-                RUN_STATS["gpu_cpu_fallback_pixels"] += 1
+            RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
+            RUN_STATS["gpu_cpu_fallback_pixels"] = len(ii)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
         Mr, Mth, Mphi = (np.zeros((len(alfa_t), len(beta))) for _ in range(3))
@@ -287,11 +298,18 @@ def save_run(
         "elapsed_s": elapsed_s,
         "shadow_pixels": int((out["status"] == 1).sum()),
         "device": RUN_STATS.get("device", "cpu"),
-        **(
-            {"gpu_cpu_fallback_pixels": RUN_STATS["gpu_cpu_fallback_pixels"]}
-            if "gpu_cpu_fallback_pixels" in RUN_STATS
-            else {}
-        ),
+        **{
+            k: RUN_STATS[k]
+            for k in (
+                "gpu_cpu_fallback_pixels",
+                "gpu_chunk_rows",
+                "gpu_dispatch_s_max",
+                "gpu_dispatch_s_mean",
+                "matrix_s",
+                "retrace_s",
+            )
+            if k in RUN_STATS
+        },
         "numba_threads": numba.get_num_threads(),
         "versions": {
             "python": platform.python_version(),

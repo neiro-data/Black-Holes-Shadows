@@ -5,7 +5,9 @@ RKF45 `run_kut4_mod`, `func`). Differences from the CPU float64 path, forced by 
 
 - `derNU` is not a `1e-6` central difference (useless in float32). The Schwarzschild part has
   analytic derivatives; the disk part (`nuD`, closed form) uses a float32 central difference with
-  a scaled step `h = HDER_GPU * max(1, |x|)`. `dlamb2` is built from these derivatives, as on CPU.
+  a scaled step `h = HDER_GPU * max(1, |x|)`. For `0 < |z| < h` the z derivative is a one-sided
+  second-order difference (the central stencil would straddle the kink of `nuD` at z=0).
+  `dlamb2` is built from these derivatives, as on CPU.
 - `nuD` is evaluated in an algebraically identical, cancellation-free form
   (`w + sqrt(w^2 + 4 a^2 z^2) = 4 a^2 z^2 / (sqrt(...) - w)` for `w < 0`).
 - `lamb` is the same bilinear lookup on the (float32) `Mat_nu` table, passed as a 2-D input.
@@ -86,7 +88,15 @@ inline void nu_all(float rho, float z, thread const P& p,
     float hr = HDER_GPU*max(1.f, fabs(rho)), hz = HDER_GPU*max(1.f, fabs(z));
     nu += nuD_(rho, z, p.MD, p.b);
     nr += 0.5f*(nuD_(rho + hr, z, p.MD, p.b) - nuD_(rho - hr, z, p.MD, p.b))/hr;
-    nz += 0.5f*(nuD_(rho, z + hz, p.MD, p.b) - nuD_(rho, z - hz, p.MD, p.b))/hz;
+    if (z != 0.f && fabs(z) < hz) {{
+      // nuD is even in z with a kink at z=0: a central stencil would straddle it, so use a
+      // 2nd-order one-sided difference on the side of z.
+      float s = z > 0.f ? 1.f : -1.f;
+      nz += s*(-3.f*nuD_(rho, z, p.MD, p.b) + 4.f*nuD_(rho, z + s*hz, p.MD, p.b)
+               - nuD_(rho, z + 2.f*s*hz, p.MD, p.b))/(2.f*hz);
+    }} else {{
+      nz += 0.5f*(nuD_(rho, z + hz, p.MD, p.b) - nuD_(rho, z - hz, p.MD, p.b))/hz;
+    }}
   }}
 }}
 
