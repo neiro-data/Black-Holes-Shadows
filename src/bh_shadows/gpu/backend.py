@@ -1,7 +1,7 @@
-"""Optional Apple-Silicon GPU backend: availability probe, device resolution, launch helper.
+"""Optional Apple GPU backend: GPU probe, device choice and kernel launch.
 
-MLX is imported lazily so hosts without it (CI, Linux, Intel Macs) still import this module.
-The GPU path is float32 only (Apple GPUs have no float64) and is opt-in.
+The module imports MLX only when it needs it, so it works on hosts without MLX. The GPU uses
+float32 only. See docs/GPU.md.
 """
 
 from __future__ import annotations
@@ -24,7 +24,14 @@ _kernel_cache: dict[tuple[str, str], object] = {}
 
 
 def gpu_available() -> bool:
-    """True on Apple Silicon with MLX importable and a GPU default device. Never raises."""
+    """Return True if the Apple GPU is available.
+
+    Returns
+    -------
+    bool
+        True on Apple Silicon with MLX installed and a GPU default device. The function does not
+        raise.
+    """
     try:
         if sys.platform != "darwin" or platform.machine() != "arm64":
             return False
@@ -36,7 +43,26 @@ def gpu_available() -> bool:
 
 
 def resolve_device(opt: str, parallel: bool = True) -> str:
-    """Map a `device` option (auto|cpu|gpu) to the device that will actually run."""
+    """Return the device that runs the trace.
+
+    Parameters
+    ----------
+    opt : {"auto", "cpu", "gpu"}
+        Device option. "gpu" falls back to "cpu" (with a warning) if no GPU is available. "auto"
+        selects "gpu" only if `AUTO_PREFERS_GPU` is set.
+    parallel : bool, optional
+        False for a serial run. "auto" then selects "cpu".
+
+    Returns
+    -------
+    str
+        "cpu" or "gpu".
+
+    Raises
+    ------
+    ValueError
+        If `opt` is not a known device.
+    """
     if opt not in DEVICES:
         raise ValueError(f"device must be auto|cpu|gpu, got {opt!r}")
     if opt == "cpu":
@@ -58,10 +84,31 @@ def launch(
     n_threads: int,
     out_len: int | None = None,
 ) -> dict[str, np.ndarray]:
-    """Run an MSL kernel (one thread per item) and return numpy outputs.
+    """Run a Metal kernel with one thread for each item.
 
-    `inputs` are cast to float32 (int arrays keep int32); the kernel is compiled once per
-    process and cached by (name, source).
+    The function compiles each kernel one time for each process and keeps it in a cache.
+
+    Parameters
+    ----------
+    name : str
+        Kernel name.
+    header : str
+        MSL code before the kernel body (structs and functions).
+    source : str
+        MSL kernel body.
+    inputs : dict of str to np.ndarray
+        Kernel inputs. Float arrays become float32. Integer arrays become int32.
+    outputs : dict of str to np.dtype
+        Output names and types (float32 or int32).
+    n_threads : int
+        Number of threads.
+    out_len : int, optional
+        Length of each output. The default is `n_threads`.
+
+    Returns
+    -------
+    dict of str to np.ndarray
+        Outputs as numpy arrays.
     """
     import mlx.core as mx
 

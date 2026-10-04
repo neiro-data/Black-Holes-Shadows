@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from weyl_plot import PALETTES
+from bh_shadows.plots.weyl_plot import PALETTES
 
 BACKGROUNDS = ("palette", "black_hole", "two_color", "greyscale", "four_color", "image")
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
@@ -19,11 +19,20 @@ _STAMP_RE = re.compile(r"\d{8}_\d{6}")
 
 
 def _now_stamp() -> str:
+    """Return the local time as `YYYYMMDD_HHMMSS`."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 @dataclass(frozen=True)
 class ShadowConfig:
+    """Validated config of one run.
+
+    The fields follow the TOML sections: spacetime (`M`, `a`, `MD`, `b`), observer (`distance`,
+    `theta0`), grid (`n`, `half_angle`), tracer (`*_opt`, `parallel`), matrix (`n_grid`,
+    `source_opt`) and plot. The `*_opt` fields hold the raw option. The properties give the resolved
+    value. See docs/SCHEMA.md for each key.
+    """
+
     name: str = ""
     # spacetime
     M: float = 1.0
@@ -62,6 +71,14 @@ class ShadowConfig:
     timestamp: str = field(default_factory=_now_stamp)
 
     def __post_init__(self) -> None:
+        """Validate the field values.
+
+        Raises
+        ------
+        ValueError
+            If a value is out of range or if two values do not agree (for example `M + MD != 1`, or
+            `a != 0` with `MD > 0`).
+        """
         if not _STAMP_RE.fullmatch(self.timestamp):
             raise ValueError(f"timestamp must be YYYYMMDD_HHMMSS, got {self.timestamp!r}")
         if self.palette not in PALETTES:
@@ -125,36 +142,48 @@ class ShadowConfig:
 
     @property
     def backend(self) -> str:
+        """Tracer name: "weyl" or "kerr". "auto" selects "kerr" when `a != 0`."""
         if self.backend_opt != "auto":
             return self.backend_opt
         return "kerr" if self.a != 0 else "weyl"
 
     @property
     def disk_visible(self) -> bool:
+        """True if rays stop at the disk. "auto" gives `MD > 0`."""
         if self.disk_visible_opt == "auto":
             return self.MD > 0
         return bool(self.disk_visible_opt)
 
     @property
     def matrix_source(self) -> str:
+        """Lambda table method. "auto" gives "analytic" when `MD == 0`."""
         if self.source_opt != "auto":
             return self.source_opt
         return "analytic" if self.MD == 0 else "quadrature"
 
     @property
     def run_name(self) -> str:
+        """Run name: `name`, or a name made from the parameters."""
         return self.name or f"{self.backend}_M{self.M}_a{self.a}_MD{self.MD}_b{self.b}_n{self.n}"
 
     @property
     def run_id(self) -> str:
+        """Run identifier: `<timestamp>_<run_name>`."""
         return f"{self.timestamp}_{self.run_name}"
 
     @property
     def run_dir(self) -> Path:
+        """Output folder: `RUNS_DIR / run_id`."""
         return RUNS_DIR / self.run_id
 
     def to_metadata(self) -> dict:
-        """Run parameters for run.json (runtime stats are added by the runner)."""
+        """Return the run parameters for `run.json`.
+
+        Returns
+        -------
+        dict
+            Config values. The runner adds the run statistics.
+        """
         started = datetime.strptime(self.timestamp, "%Y%m%d_%H%M%S").astimezone()
         weyl = self.backend == "weyl"
         return {
@@ -191,6 +220,20 @@ class ShadowConfig:
 
     @classmethod
     def from_toml(cls, path: str | Path, overrides: dict | None = None) -> ShadowConfig:
+        """Load a config from a TOML file.
+
+        Parameters
+        ----------
+        path : str or Path
+            TOML file. A relative `[plot] image` path is resolved against the folder of this file.
+        overrides : dict, optional
+            Field values that replace the file values. None values are ignored.
+
+        Returns
+        -------
+        ShadowConfig
+            Validated config.
+        """
         with open(path, "rb") as f:
             raw = tomllib.load(f)
         flat = {"name": raw.get("name", "")}
@@ -240,6 +283,13 @@ class ShadowConfig:
         return cls(**flat)
 
     def to_toml(self) -> str:
+        """Return the config as TOML text.
+
+        Returns
+        -------
+        str
+            TOML text that `from_toml` can read again.
+        """
         d = asdict(self)
         disk = d["disk_visible_opt"]
         disk_s = f'"{disk}"' if isinstance(disk, str) else str(disk).lower()
@@ -262,6 +312,13 @@ class ShadowConfig:
         )
 
     def write_resolved(self) -> Path:
+        """Write the config to `run_dir / "config.resolved.toml"`.
+
+        Returns
+        -------
+        Path
+            Path of the written file.
+        """
         self.run_dir.mkdir(parents=True, exist_ok=True)
         path = self.run_dir / "config.resolved.toml"
         path.write_text(self.to_toml())

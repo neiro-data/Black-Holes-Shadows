@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import numpy as np
 import pytest
 
-import visuals as v
+from bh_shadows.plots import visuals as v
 
 N = 4
 HALF_PI = np.pi / 2
@@ -147,7 +147,7 @@ def test_light_theta_obs_moves_peak():
 
 
 def test_from_config_theta_obs_weyl():
-    from shadow_config import ShadowConfig
+    from bh_shadows.runner.shadow_config import ShadowConfig
 
     cfg = ShadowConfig(M=0.9, MD=0.1)
     assert v.VisualSpec.from_config(cfg).theta_obs == pytest.approx(HALF_PI)

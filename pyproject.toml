@@ -10,10 +10,21 @@ dependencies = [
     "tqdm>=4.70.1",
 ]
 
+[project.scripts]
+bh-shadow = "bh_shadows.runner.run_shadow:main"
+bh-matrix = "bh_shadows.core.matrix:main"
+
 [project.optional-dependencies]
 gpu = [
     "mlx>=0.32 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
+
+[build-system]
+requires = ["uv_build>=0.9,<1"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "bh_shadows"
 
 [tool.ruff]
 line-length = 100
@@ -30,7 +41,7 @@ ignore = ["S101"]
 [tool.ruff.lint.per-file-ignores]
 # Single-letter names (l, I) mirror the physics/numerics convention (l = derivative
 # axis selector, I = bilinear-interpolation weight) from the legacy implementation.
-"weyl_core.py" = ["E741"]
+"src/bh_shadows/core/weyl_core.py" = ["E741"]
 
 [dependency-groups]
 dev = [
@@ -39,5 +50,4 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]

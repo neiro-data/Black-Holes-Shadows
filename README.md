@@ -6,20 +6,21 @@ This repository ray-traces null geodesics to compute **black-hole shadow** image
 **gravitational-lensing** images. It covers two independent spacetimes.
 
 - A **Weyl-coordinate Schwarzschild black hole** in a thin, massive Morgan-Morgan accretion disk.
-  Most scripts use the shared physics core, `weyl_core.py`.
-- A **Kerr black hole** in Boyer-Lindquist `(r, theta)` coordinates. `kerr_core.py` holds that
-  path, and it is self-contained.
+  The physics core is `bh_shadows.core.weyl_core`.
+- A **Kerr black hole** in Boyer-Lindquist `(r, theta)` coordinates. `bh_shadows.core.kerr_core`
+  holds that path, and it is self-contained.
 
 Details:
 
 - **Stack:** Python 3.11 or later, managed by [`uv`](https://docs.astral.sh/uv/). numpy, scipy,
   matplotlib, numba. ruff for lint and format.
 - **What it does:** the Weyl family tabulates a lambda lookup matrix once, traces rays against
-  it, and plots the result. The Kerr driver integrates on its own. The numerics use an RKF45
-  integrator under numba, with `prange` in the production tracer.
-- **GPU:** optional MLX backend for Kerr and Weyl (`--device gpu`); see "GPU backend" below.
-- **Entry points:** `generate_matriz.py` for the Weyl family, which must run first.
-  `lensing_r_theta.py` for the Kerr family.
+  it, and plots the result. The Kerr tracer needs no matrix. The numerics use an RKF45
+  integrator under numba, with `prange` in the parallel tracer.
+- **GPU:** optional MLX backend for Kerr and Weyl (`--device gpu`); see "GPU backend" below and
+  [docs/GPU.md](docs/GPU.md).
+- **Entry points:** `uv run bh-shadow <config.toml>` traces and plots one case. `uv run bh-matrix`
+  builds a lambda table (the runner also builds it when it is missing).
 - **Run outputs:** each run dir holds one `outputs.npz` with the keys `status`, `coord1`, `coord2` (and `phi` for Kerr). Load it with `np.load`. There are no `.txt` outputs.
 - **Matrix build on GPU:** not supported. The quadrature path uses scalar adaptive `scipy.quad`, which does not port to MLX. The analytic path (MD == 0) takes milliseconds. The GPU path only reads the matrix.
 - **Host requirements:** `uv` only. numba compiles on the first run of a script.
@@ -30,8 +31,8 @@ An MLX Metal kernel (float32) can trace Kerr and Weyl (Schwarzschild) rays inste
 
 ```bash
 uv sync --extra gpu
-uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --device gpu
-uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64 --device gpu
+uv run bh-shadow configs/kerr_a0.9_nodisk.toml --device gpu
+uv run bh-shadow configs/schwarzschild_disk.toml --n 64 --device gpu
 ```
 
 - Set it with `[tracer] device = "auto|cpu|gpu"` or `--device`. `auto` resolves to `cpu` for now (`AUTO_PREFERS_GPU` stays `False`).
@@ -39,7 +40,7 @@ uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64 --device gpu
 - Rays that fail in float32 (status 3) are re-traced on the CPU. `run.json` records `device`
   and `gpu_cpu_fallback_pixels`, plus `gpu_chunk_rows`, `gpu_dispatch_s_max`,
   `gpu_dispatch_s_mean`, `matrix_s` (matrix build + load) and `retrace_s`.
-- Rows per kernel launch: `GPU_CHUNK_ROWS = 32` in `run_shadow.py` (both backends).
+- Rows per kernel launch: `GPU_CHUNK_ROWS = 32` in `bh_shadows/runner/run_shadow.py` (both backends).
 - Benchmark one config (n <= 64; one config per process): `uv run python scripts/gpu_bench.py
   --config configs/schwarzschild_disk.toml --n 64 --n-grid 1200 --device gpu --chunk 32`.
   `--agree` compares CPU and GPU on the same table.
@@ -69,75 +70,56 @@ MD = 0.1): status mismatch 0 of 4096 pixels; median |d coord1| on escaped pixels
 |d coord2| 6.3e-5; 1140 disk pixels on both devices, median |d coord1| 6.3e-4; 0 fallback pixels.
 
 ## Agent read
-If you are an AI agent, read also [README_AGENT.md](README_AGENT.md).
+If you are an AI agent, read also [README_AGENT.md](docs/README_AGENT.md).
 
 ## Quick start
 
-```bash
-uv sync                                  # install
-uv run python generate_matriz.py         # stage 1 - tabulate the lookup matrix
-uv run python test_parallel_SHADOW.py    # stage 2 - trace the shadow, multicore
-uv run python symmetry.py                # stage 3 - plot
-```
-
-Or run a whole case from one config (Schwarzschild ± disk, Kerr without disk):
+Run a whole case from one config (Schwarzschild ± disk, Kerr without disk):
 
 ```bash
-uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64
-scripts/run_cases.sh                     # all shipped configs, one process each
+uv sync                                                  # install
+uv run bh-shadow configs/schwarzschild_disk.toml --n 64  # trace, save, plot
+scripts/run_cases.sh                                     # all shipped configs, one process each
 ```
 
 Output goes to `runs/<YYYYMMDD_HHMMSS>_<name>/`, with a `run.json` that records the parameters.
 A progress bar shows on stderr. Use `--no-progress` to hide it. The Weyl tracer is slow (about 8 minutes at n = 64).
 
-The Kerr driver needs no matrix.
-
-```bash
-uv run python lensing_r_theta.py
-```
+The Kerr tracer needs no matrix: `uv run bh-shadow configs/kerr_a0.9_nodisk.toml --n 64`.
 
 A full run is expensive. Shrink the grids first and check that the code runs. See
-[scripts-guide.md — Smoke test](scripts-guide.md#smoke-test).
+[scripts-guide.md — Smoke test](docs/scripts-guide.md#smoke-test).
 
 For every script, its defaults, the colormaps and the checks, see
-**[scripts-guide.md](scripts-guide.md)**.
+**[scripts-guide.md](docs/scripts-guide.md)**.
 
 ## Modes
 
-Each Weyl tracer selects its spacetime through the disk mass `MD`, at the top of `__main__`.
+The config selects the spacetime through `[spacetime]` (`M`, `a`, `MD`, `b`). `M + MD` must be 1.0.
 
-| Mode | Set | Load |
+| Mode | Set | Tracer |
 | --- | --- | --- |
-| Black hole only | `MD = 0.0` | A matrix tabulated with `MD = 0.0`. |
-| Black hole and disk | `MD > 0.0` | The matching matrix, for example `M = 0.9, MD = 0.1`. `M + MD` must be 1.0. |
-
-The name of the loaded matrix must match the chosen `MD`. Change `MD` and the argument of
-`wc.load_matrix(...)` together.
-
-The names in the tree do not match today. Read
-[README_AGENT.md — Matrix name against mode](README_AGENT.md#matrix-name-against-mode) before a
-real run.
+| Black hole only | `MD = 0.0`, `a = 0` | Weyl (analytic lambda table). |
+| Black hole and disk | `MD > 0.0`, `a = 0` | Weyl (quadrature lambda table, built once and cached). |
+| Kerr | `a > 0`, `MD = 0` | Kerr (no table). |
 
 ## Plotting
 
-A plotting script picks a palette by name, with `weyl_plot.get_colormap(...)`. Five presets
-exist, from `black_white` to `quadrant`, which gives one colour per lensed-disk quadrant.
-
-An optional hook, `weyl_plot.load_grid_from_image(path)`, builds a grid mask from an image that
-you supply.
+The `palette` background picks a palette by name, with `weyl_plot.get_colormap(...)`. Five
+presets exist, from `black_white` to `quadrant`, which gives one colour per lensed-disk quadrant.
 
 The config runner can also colour the final image from the ray outcome, with `[plot] background`
 (`palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image`) and an optional
 celestial-sphere `grid`. This is a post-process on the traced arrays and adds no tracing cost. The
 Weyl backend has no traced phi, so left/right and grid phi lines use a flat-sky approximation. Keys
 `light_source = true` adds a white glow behind the black hole (two_color/four_color), which lenses into a bright ring. Keys
-are in [SCHEMA.md](SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
+are in [SCHEMA.md](docs/SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
 
 `[plot] shadow_edge = true` (default `false`) draws the analytic shadow edge as a dashed cyan
 curve: the Schwarzschild circle for `a = 0`, the Kerr curve for `a != 0`. It draws nothing for a Weyl
 disk (`MD > 0`).
 
-See [scripts-guide.md — Colormaps](scripts-guide.md#colormaps).
+See [scripts-guide.md — Colormaps](docs/scripts-guide.md#colormaps).
 
 ## Validation
 
@@ -164,30 +146,27 @@ Notes:
 
 ## Data files
 
-Every intermediate file is a plain-text matrix. The lambda matrix spans `rho` in [0, 40] and `z`
-in [-40, 40], at 1200 by 1200. The tracers write one quadrant of the emission-angle grid, and the
-plotting stage mirrors it.
+The lambda table is a compressed NumPy file (`matrices/lambda_*.npz`) that spans `rho` in [0, 40]
+and `z` in [-40, 40], at 1200 by 1200 by default. Each run writes `runs/<id>/outputs.npz`.
 
-Full file reference in **[SCHEMA.md](SCHEMA.md)**.
+Full file reference in **[SCHEMA.md](docs/SCHEMA.md)**.
 
 ## Layout
 
 ```
-weyl_core.py              the shared Weyl core: metric, RKF45, func/f_paral, load_matrix
-kerr_core.py              the self-contained Kerr (r, theta) tracer core
-weyl_plot.py              the colormaps and the shadow/disk/quadrant classification helpers
-generate_matriz.py        stage 1 - tabulates the lambda lookup matrix; run this first
-test_parallel_SHADOW.py   stage 2 - the production shadow tracer, numba prange
-test_Z_SHADOW.py          stage 2 - the serial shadow tracer, with live plotting
-test_symmetry_lensing.py  stage 2 - the lensing tracer; saves Mat, Mz, Mphi
-lensing_r_theta.py        the Kerr driver; needs no lookup matrix
-symmetry.py               stage 3 - plots from the saved matrices
-simetria_shadow.py        stage 3 - plots from the saved matrices
-simetria_shadow_v2.py     stage 3 - plots from the saved matrices
-lensing_image.py          stage 3 - plots from the saved matrices
-initial_prompt.txt        the prompt that produced this version of the repository
+src/bh_shadows/           the installed package
+  core/                   physics: weyl_core, kerr_core, matrix (lambda table), shadow_edge
+  gpu/                    optional MLX GPU backend: backend, weyl_gpu, kerr_gpu
+  plots/                  weyl_plot (palettes, classification), visuals (image colouring)
+  runner/                 run_shadow (bh-shadow), shadow_config (TOML config)
+scripts/                  gpu_bench.py, validate_physics.py, run_cases.sh
+tests/                    pytest suite (grids of n <= 64)
+configs/                  TOML configs; configs/examples/ for the visuals
+docs/
+  scripts-guide.md        every command, the colormaps, the smoke test, the checks
+  SCHEMA.md               the lambda matrix, the outputs, the [plot] config keys
+  GPU.md                  the GPU port: kernels, headers, differences, limitations
+  README_AGENT.md         the load-bearing choices of the physics core
+  initial_prompt.txt      the prompt that produced this version of the repository
 README.md                 this file - what it computes and the first run
-scripts-guide.md          every script, the colormaps, the smoke test, the checks
-SCHEMA.md                 the lambda matrix and the ray-tracing matrices
-README_AGENT.md           the load-bearing choices and the name mismatch
 ```

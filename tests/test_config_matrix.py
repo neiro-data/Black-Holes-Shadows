@@ -5,8 +5,8 @@ import logging
 import numpy as np
 import pytest
 
-import generate_matriz as gm
-from shadow_config import ShadowConfig
+from bh_shadows.core import matrix as gm
+from bh_shadows.runner.shadow_config import ShadowConfig
 
 
 def write_cfg(tmp_path, body):
@@ -60,7 +60,7 @@ def test_matrix_sidecar_mismatch(tmp_path, monkeypatch):
 
 def test_ensure_matrix_logs_build_then_cache(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(gm, "MATRICES_DIR", tmp_path)
-    caplog.set_level(logging.INFO, logger="generate_matriz")
+    caplog.set_level(logging.INFO, logger="bh_shadows.core.matrix")
     gm.ensure_matrix(1.0, 0.0, 6.0, 20)
     assert "built in" in caplog.text
     caplog.clear()

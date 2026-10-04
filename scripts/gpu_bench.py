@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-"""Time the tracer on one config (n <= 64) and print one JSON line per run.
+"""Measure the trace time of one config (n <= 64) and print one JSON line.
 
     uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 \
         --n-grid 1200 --device gpu --chunk 16 --repeats 3
     uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --agree
 
-One config per process: `weyl_core.Mat_nu` is frozen at first numba compile. `--agree` traces on
-the CPU, then on the GPU, in the same process (same frozen table) and prints the agreement.
+Use one config for each process. Numba fixes `weyl_core.Mat_nu` at the first compile. `--agree`
+traces on the CPU and then on the GPU in the same process (same table) and prints the agreement.
 """
 
 from __future__ import annotations
@@ -14,22 +14,33 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import generate_matriz as gm  # noqa: E402
-import run_shadow as rs  # noqa: E402
-import shadow_config as sc  # noqa: E402
+from bh_shadows.core import matrix as gm
+from bh_shadows.runner import run_shadow as rs
+from bh_shadows.runner import shadow_config as sc
 
 MAX_N = 64
 
 
 def _cfg(args, device: str) -> sc.ShadowConfig:
+    """Load the config with the benchmark overrides.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments (`config`, `n`, `n_grid`).
+    device : str
+        Device option.
+
+    Returns
+    -------
+    ShadowConfig
+        Config named "bench".
+    """
     ov = {"n": args.n, "device_opt": device, "name": "bench"}
     if args.n_grid:
         ov["n_grid"] = args.n_grid
@@ -37,6 +48,18 @@ def _cfg(args, device: str) -> sc.ShadowConfig:
 
 
 def _near_status_change(status: np.ndarray) -> np.ndarray:
+    """Return the pixels that touch a different status (8-neighbourhood).
+
+    Parameters
+    ----------
+    status : np.ndarray
+        Status image.
+
+    Returns
+    -------
+    np.ndarray
+        True where a neighbour has a different status.
+    """
     pad = np.pad(status, 1, mode="edge")
     h, w = status.shape
     near = np.zeros(status.shape, dtype=bool)
@@ -47,6 +70,18 @@ def _near_status_change(status: np.ndarray) -> np.ndarray:
 
 
 def bench(args) -> dict:
+    """Time one cold trace and `args.repeats` warm traces.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments.
+
+    Returns
+    -------
+    dict
+        Times (cold, median warm, matrix), dispatch statistics and fallback pixels.
+    """
     cfg = _cfg(args, args.device)
     t0 = time.perf_counter()
     rs.trace_grid(cfg, progress=False, chunk=args.chunk)  # cold: matrix build + compiles
@@ -77,6 +112,23 @@ def bench(args) -> dict:
 
 
 def agree(args) -> dict:
+    """Trace on the CPU, then on the GPU, and compare the results.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments.
+
+    Returns
+    -------
+    dict
+        Status mismatch, median coordinate differences and pixel counts.
+
+    Raises
+    ------
+    SystemExit
+        If no GPU is available.
+    """
     cpu = rs.trace_grid(_cfg(args, "cpu"), progress=False)
     gpu = rs.trace_grid(_cfg(args, "gpu"), progress=False, chunk=args.chunk)
     if rs.RUN_STATS["device"] != "gpu":
@@ -87,6 +139,7 @@ def agree(args) -> dict:
     both_disk = (sc_ == 2) & (sg == 2)
 
     def med(k, m):
+        """Return the median |CPU - GPU| of key `k` on mask `m`, or None if `m` is empty."""
         return float(np.median(np.abs(cpu[k][m] - gpu[k][m]))) if m.any() else None
 
     return {
@@ -105,6 +158,13 @@ def agree(args) -> dict:
 
 
 def main(argv=None) -> None:
+    """Run the benchmark or the agreement check and print one JSON line.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments. The default is `sys.argv[1:]`.
+    """
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", required=True)
     p.add_argument("--n", type=int, default=MAX_N)

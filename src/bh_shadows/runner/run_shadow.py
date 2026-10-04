@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Config-driven end-to-end shadow runner: one config in, one traced + plotted shadow out.
+"""Run one shadow case from a TOML config: trace, save the arrays, and plot.
 
-    uv run python run_shadow.py configs/schwarzschild_disk.toml --MD 0.0 --b 6.0
+    uv run bh-shadow configs/schwarzschild_disk.toml --MD 0.0 --b 6.0
 
-One config per process: `weyl_core.Mat_nu` is frozen at first numba compile.
+Use one config for each process. Numba fixes `weyl_core.Mat_nu` at the first compile.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ import numba
 import numpy as np
 from tqdm import tqdm
 
-import visuals
-import weyl_core as wc
-from generate_matriz import ensure_matrix, matrix_path
-from gpu_backend import resolve_device
-from shadow_config import ShadowConfig
-from weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
+from bh_shadows.core import weyl_core as wc
+from bh_shadows.core.matrix import ensure_matrix, matrix_path
+from bh_shadows.gpu.backend import resolve_device
+from bh_shadows.plots import visuals
+from bh_shadows.plots.weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
+from bh_shadows.runner.shadow_config import ShadowConfig
 
 log = logging.getLogger(__name__)
 
@@ -36,14 +36,39 @@ GPU_CHUNK_ROWS = 32  # rows per kernel launch; keeps each dispatch under the GPU
 
 
 def limit_threads(fraction: float = CORE_FRACTION) -> int:
-    """Cap numba threads at `fraction` of the system cores (at least 1); return the new count."""
+    """Set the numba thread count to a fraction of the CPU cores.
+
+    Parameters
+    ----------
+    fraction : float, optional
+        Fraction of `os.cpu_count()`. The result is at least 1 and at most the numba limit.
+
+    Returns
+    -------
+    int
+        New thread count.
+    """
     n = max(1, min(int((os.cpu_count() or 1) * fraction), numba.config.NUMBA_NUM_THREADS))
     numba.set_num_threads(n)
     return n
 
 
 def _resolve_run_device(cfg: ShadowConfig) -> str:
-    """Validate `device_opt` always (even when serial); the serial path runs on the CPU."""
+    """Return the device for a run.
+
+    The function always validates `cfg.device_opt`. A serial run (`parallel=False`) always uses the
+    CPU.
+
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config.
+
+    Returns
+    -------
+    str
+        "cpu" or "gpu".
+    """
     device = resolve_device(cfg.device_opt, cfg.parallel)
     if not cfg.parallel:
         if cfg.device_opt == "gpu":
@@ -53,6 +78,18 @@ def _resolve_run_device(cfg: ShadowConfig) -> str:
 
 
 def _angles(cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Return the pixel angle grids.
+
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config. Uses `n` and `half_angle`.
+
+    Returns
+    -------
+    alpha, beta : np.ndarray
+        `alpha` goes from -half_angle to half_angle. `beta` goes from half_angle to -half_angle.
+    """
     h = cfg.half_angle
     return np.linspace(-h, h, cfg.n), np.linspace(h, -h, cfg.n)
 
@@ -66,9 +103,27 @@ def _chunked_rows(
     chunk: int | None = None,
     record_dispatch: bool = False,
 ) -> tuple:
-    """Call `fn(start, stop)` over row chunks, updating a progress bar; concat along axis 0.
+    """Call a tracer on row chunks and join the results.
 
-    With `record_dispatch`, per-call wall times go to `RUN_STATS` (GPU watchdog budget).
+    Parameters
+    ----------
+    fn : callable
+        `fn(start, stop)` traces rows `start:stop` and returns a tuple of arrays.
+    n_rows : int
+        Total number of rows.
+    progress : bool
+        Show a progress bar.
+    desc : str
+        Label of the progress bar.
+    chunk : int, optional
+        Rows in each call. The default is the numba thread count.
+    record_dispatch : bool, optional
+        Write the chunk size and the max and mean call times to `RUN_STATS`.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        Each output of `fn`, joined along axis 0.
     """
     chunk = max(1, chunk or numba.get_num_threads())
     parts = []
@@ -88,6 +143,20 @@ def _chunked_rows(
 
 
 def _mirror4(q: np.ndarray, sign_flip_lower: bool = False) -> np.ndarray:
+    """Mirror one quadrant into the full image.
+
+    Parameters
+    ----------
+    q : np.ndarray
+        Quadrant array.
+    sign_flip_lower : bool, optional
+        Change the sign of the lower half (use it for z).
+
+    Returns
+    -------
+    np.ndarray
+        Array with twice the rows and twice the columns of `q`.
+    """
     full = mirror_quadrants(q)
     if sign_flip_lower:
         full[q.shape[0] :, :] *= -1
@@ -97,7 +166,25 @@ def _mirror4(q: np.ndarray, sign_flip_lower: bool = False) -> np.ndarray:
 def _trace_weyl(
     cfg: ShadowConfig, progress: bool = True, chunk: int | None = None
 ) -> dict[str, np.ndarray]:
-    """Trace one quadrant (static, equatorially symmetric) and mirror both axes."""
+    """Trace a Weyl (static) run.
+
+    The spacetime is symmetric about the equator and about the image centre. The function traces one
+    quadrant and mirrors it. On the GPU, it traces the status-3 pixels again on the CPU.
+
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config.
+    progress : bool, optional
+        Show a progress bar.
+    chunk : int, optional
+        Rows in each tracer call.
+
+    Returns
+    -------
+    dict of str to np.ndarray
+        `status`, `coord1` (rho) and `coord2` (z), each of shape (n, n).
+    """
     log.info(
         "weyl run: lambda matrix %s",
         "found (cached)"
@@ -111,24 +198,26 @@ def _trace_weyl(
     z0 = 0.0
     rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=z0, target_gpp_sqrt=cfg.distance)
 
-    alfa_f, beta_f = _angles(cfg)
+    alpha_full, beta_full = _angles(cfg)
     half = cfg.n // 2
-    alfa, beta = alfa_f[:half], beta_f[:half]
+    alpha, beta = alpha_full[:half], beta_full[:half]
     device = _resolve_run_device(cfg)
     RUN_STATS["device"] = device
     if cfg.parallel:
         if device == "gpu":
-            import weyl_gpu
+            from bh_shadows.gpu import weyl_gpu
 
             def tracer(s, e):
+                """Trace rows `s:e` on the GPU."""
                 return weyl_gpu.f_paral_gpu(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[s:e], beta, cfg.disk_visible, wc.Mat_nu
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[s:e], beta, cfg.disk_visible, wc.Mat_nu
                 )
         else:
 
             def tracer(s, e):
+                """Trace rows `s:e` on the CPU."""
                 return wc.f_paral(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[s:e], beta, HDER, cfg.disk_visible
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[s:e], beta, HDER, cfg.disk_visible
                 )
 
         Mat, Mz, *gpu_st = _chunked_rows(
@@ -146,7 +235,7 @@ def _trace_weyl(
             if fail.any():
                 ii, jj = np.nonzero(fail)
                 Mat[ii, jj], Mz[ii, jj] = wc.retrace_points(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa, beta, ii, jj, HDER, cfg.disk_visible
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha, beta, ii, jj, HDER, cfg.disk_visible
                 )
             RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
@@ -157,16 +246,16 @@ def _trace_weyl(
                 y = np.array(
                     [
                         rho0,
-                        wc.dr(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i], beta[j]),
+                        wc.dr(rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[i], beta[j]),
                         z0,
-                        wc.dthe(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i]),
+                        wc.dthe(rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[i]),
                     ]
                 )
                 Mat[i, j], Mz[i, j] = wc.func(
                     y,
                     300.0,
                     -0.02,
-                    alfa[i],
+                    alpha[i],
                     beta[j],
                     cfg.M,
                     rho0,
@@ -189,29 +278,45 @@ def _trace_weyl(
 def _trace_kerr(
     cfg: ShadowConfig, progress: bool = True, chunk: int | None = None
 ) -> dict[str, np.ndarray]:
-    """Trace the full beta range (frame dragging breaks left/right symmetry).
+    """Trace a Kerr run.
 
-    Alpha is mirrored only at theta0 == 90 deg; otherwise the whole grid is traced.
+    Frame dragging breaks the left/right symmetry, so the function always traces all beta values. It
+    mirrors alpha only when `theta0 == 90`. On the GPU, it traces the status-3 pixels again on the
+    CPU.
+
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config.
+    progress : bool, optional
+        Show a progress bar.
+    chunk : int, optional
+        Rows in each tracer call.
+
+    Returns
+    -------
+    dict of str to np.ndarray
+        `status`, `coord1` (r), `coord2` (theta) and `phi`, each of shape (n, n).
     """
-    import kerr_core as kc
+    from bh_shadows.core import kerr_core as kc
 
     theta0 = np.deg2rad(cfg.theta0)
-    alfa, beta = _angles(cfg)
+    alpha, beta = _angles(cfg)
     mirror = cfg.theta0 == 90.0
-    alfa_t = alfa[: cfg.n // 2] if mirror else alfa
+    alpha_t = alpha[: cfg.n // 2] if mirror else alpha
 
     device = _resolve_run_device(cfg)
     RUN_STATS["device"] = device
     if cfg.parallel:
         if device == "gpu":
-            import kerr_gpu
+            from bh_shadows.gpu import kerr_gpu
 
             tracer = kerr_gpu.f_paral_gpu
         else:
             tracer = kc.f_paral
         Mr, Mth, Mphi, Mst = _chunked_rows(
-            lambda s, e: tracer(cfg.distance, theta0, cfg.a, cfg.M, alfa_t[s:e], beta),
-            len(alfa_t),
+            lambda s, e: tracer(cfg.distance, theta0, cfg.a, cfg.M, alpha_t[s:e], beta),
+            len(alpha_t),
             progress=progress,
             desc="kerr-gpu" if device == "gpu" else "kerr",
             chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
@@ -222,42 +327,55 @@ def _trace_kerr(
             ii, jj = np.nonzero(Mst == 3)
             if len(ii):
                 Mr[ii, jj], Mth[ii, jj], Mphi[ii, jj], Mst[ii, jj] = kc.retrace_points(
-                    cfg.distance, theta0, cfg.a, cfg.M, alfa_t, beta, ii, jj
+                    cfg.distance, theta0, cfg.a, cfg.M, alpha_t, beta, ii, jj
                 )
             RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             RUN_STATS["gpu_cpu_fallback_pixels"] = len(ii)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
-        Mr, Mth, Mphi = (np.zeros((len(alfa_t), len(beta))) for _ in range(3))
-        Mst = np.zeros((len(alfa_t), len(beta)), dtype=int)
-        for i in tqdm(range(len(alfa_t)), unit="row", desc="kerr", disable=not progress):
+        Mr, Mth, Mphi = (np.zeros((len(alpha_t), len(beta))) for _ in range(3))
+        Mst = np.zeros((len(alpha_t), len(beta)), dtype=int)
+        for i in tqdm(range(len(alpha_t)), unit="row", desc="kerr", disable=not progress):
             for j in range(len(beta)):
                 y = np.array(
                     [
                         cfg.distance,
-                        kc.dr(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i], beta[j]),
+                        kc.dr(cfg.distance, cfg.a, cfg.M, theta0, alpha_t[i], beta[j]),
                         theta0,
-                        kc.dthe(cfg.distance, cfg.a, cfg.M, theta0, alfa_t[i]),
+                        kc.dthe(cfg.distance, cfg.a, cfg.M, theta0, alpha_t[i]),
                         0.0,
                     ]
                 )
                 Mr[i, j], Mth[i, j], Mphi[i, j], Mst[i, j] = kc.func_status(
-                    y, 300.0, -0.02, alfa_t[i], beta[j], cfg.a, cfg.M, cfg.distance, theta0
+                    y, 300.0, -0.02, alpha_t[i], beta[j], cfg.a, cfg.M, cfg.distance, theta0
                 )
 
     out = {"status": Mst, "coord1": Mr, "coord2": Mth, "phi": Mphi}
     if mirror:  # equatorial reflection: theta -> pi - theta, r and phi unchanged
         out = {k: np.vstack([v, v[::-1]]) for k, v in out.items()}
-        out["coord2"][len(alfa_t) :] = np.pi - out["coord2"][len(alfa_t) :]
+        out["coord2"][len(alpha_t) :] = np.pi - out["coord2"][len(alpha_t) :]
     return out
 
 
 def trace_grid(
     cfg: ShadowConfig, progress: bool = True, chunk: int | None = None
 ) -> dict[str, np.ndarray]:
-    """Trace the full image for `cfg` and return status/coord1/coord2 (and phi for Kerr).
+    """Trace the full image for a config.
 
-    `chunk` = rows per `f_paral` call in the parallel path (default: numba thread count).
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config. `cfg.backend` selects the Weyl or the Kerr tracer.
+    progress : bool, optional
+        Show a progress bar.
+    chunk : int, optional
+        Rows in each tracer call. The default is the numba thread count (CPU) or `GPU_CHUNK_ROWS`
+        (GPU).
+
+    Returns
+    -------
+    dict of str to np.ndarray
+        `status`, `coord1`, `coord2`, and `phi` (Kerr only).
     """
     RUN_STATS.clear()
     trace = _trace_weyl if cfg.backend == "weyl" else _trace_kerr
@@ -271,6 +389,22 @@ def save_run(
     elapsed_s: float | None = None,
     config_path: str | None = None,
 ) -> None:
+    """Write the run outputs to `cfg.run_dir`.
+
+    The function writes `config.resolved.toml`, `outputs.npz` and `run.json`. It also writes
+    `image.png` if `cfg.save` is set.
+
+    Parameters
+    ----------
+    cfg : ShadowConfig
+        Run config.
+    out : dict of str to np.ndarray
+        Result of `trace_grid`.
+    elapsed_s : float, optional
+        Trace time, written to `run.json`.
+    config_path : str, optional
+        Source config path, written to `run.json`.
+    """
     run_dir = cfg.run_dir
     cfg.write_resolved()
     log.info("saving outputs.npz to %s", run_dir)
@@ -324,6 +458,20 @@ def save_run(
 
 
 def parse_args(argv=None) -> tuple[str, dict]:
+    """Parse the command line of `bh-shadow`.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments. The default is `sys.argv[1:]`.
+
+    Returns
+    -------
+    config_path : str
+        Path of the TOML config.
+    overrides : dict
+        Config values from the command line. Unset options are not included.
+    """
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("config")
     p.add_argument("--M", type=float)
@@ -345,6 +493,13 @@ def parse_args(argv=None) -> tuple[str, dict]:
 
 
 def main(argv=None) -> None:
+    """Run one config from the command line: trace, save and plot.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments. The default is `sys.argv[1:]`.
+    """
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

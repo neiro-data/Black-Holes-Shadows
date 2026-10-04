@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import shadow_edge as se
+from bh_shadows.core import shadow_edge as se
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "validate_physics.py"
@@ -50,9 +50,9 @@ def test_shadow_edge_small_a_continuity():
 @pytest.mark.parametrize("backend", ["weyl", "kerr"])
 def test_v2_schwarzschild_edge(tmp_path, backend):
     m = run_validate(tmp_path, "--n", 64, "--a", 0, "--backend", backend)
-    for key in ("alfa_edge_top", "beta_edge_right"):
+    for key in ("alpha_edge_top", "beta_edge_right"):
         assert abs(m[key] - EDGE_ANALYTIC) <= m["pitch"], (key, m[key])
-    for key in ("alfa_edge_bottom", "beta_edge_left"):
+    for key in ("alpha_edge_bottom", "beta_edge_left"):
         assert abs(m[key] + EDGE_ANALYTIC) <= m["pitch"], (key, m[key])
 
 
@@ -62,8 +62,8 @@ def test_v4_spin_shift_flatten_mirror(tmp_path):
     m9 = run_validate(tmp_path, "--n", 64, "--a", 0.9, "--save-status", pos)
     p = m9["pitch"]
     assert m9["centroid_x"] - m0["centroid_x"] > p  # shift along -beta
-    assert abs((m9["alfa_edge_top"] - m9["alfa_edge_bottom"]) - 2 * EDGE_ANALYTIC) < 4 * p
-    assert abs(m9["alfa_edge_top"] + m9["alfa_edge_bottom"]) < p  # no shift along alpha
+    assert abs((m9["alpha_edge_top"] - m9["alpha_edge_bottom"]) - 2 * EDGE_ANALYTIC) < 4 * p
+    assert abs(m9["alpha_edge_top"] + m9["alpha_edge_bottom"]) < p  # no shift along alpha
     assert abs(m9["halfwidth_left"] - m9["halfwidth_right"]) >= p  # flattened side
     neg = tmp_path / "neg.npy"
     res = run_validate(tmp_path, "--n", 64, "--raw-kerr-a", -0.9, "--save-status", neg, check=False)
@@ -126,8 +126,8 @@ def test_validate_physics_rejects_large_n(tmp_path):
 def _lines_on_saved_fig(monkeypatch, tmp_path, **ov):
     import matplotlib.figure as mfig
 
-    import shadow_config as sc
-    import weyl_plot as wp
+    from bh_shadows.plots import weyl_plot as wp
+    from bh_shadows.runner import shadow_config as sc
 
     seen = []
     monkeypatch.setattr(
@@ -139,7 +139,7 @@ def _lines_on_saved_fig(monkeypatch, tmp_path, **ov):
 
 
 def test_shadow_edge_flag_roundtrip_and_default_off(tmp_path, monkeypatch):
-    import shadow_config as sc
+    from bh_shadows.runner import shadow_config as sc
 
     assert sc.ShadowConfig().shadow_edge is False
     cfg = sc.ShadowConfig(shadow_edge=True)

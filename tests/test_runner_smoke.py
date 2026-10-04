@@ -7,11 +7,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import generate_matriz as gm
-import run_shadow as rs
-import shadow_config as sc
-import visuals as vis
-import weyl_core as wc
+from bh_shadows.core import matrix as gm
+from bh_shadows.core import weyl_core as wc
+from bh_shadows.plots import visuals as vis
+from bh_shadows.runner import run_shadow as rs
+from bh_shadows.runner import shadow_config as sc
 
 
 @pytest.fixture(autouse=True)
@@ -51,23 +51,6 @@ def test_chunked_parallel_matches_single_call():
     assert one.keys() == whole.keys()
     for k in one:
         assert np.array_equal(one[k], whole[k], equal_nan=True)
-
-
-def test_func_disk_off_matches_wrapper_on_nodisk_rays():
-    """With disk_visible=False the ray ignores the disk; the wrapper passes True."""
-    M, MD, b, z0, hder = 1.0, 0.0, 6.0, 0.0, 1e-6
-    wc.load_matrix(str(gm.ensure_matrix(M, MD, b, 20)))
-    rho0 = wc.solve_observer_rho(M, MD, b, z0=z0)
-    for alfa, beta in [(-0.4, 0.4), (-0.05, 0.05)]:
-        y = np.array(
-            [rho0, wc.dr(rho0, z0, M, MD, b, alfa, beta), z0, wc.dthe(rho0, z0, M, MD, b, alfa)]
-        )
-        off = wc.func(y, 300.0, -0.02, alfa, beta, M, rho0, z0, MD, b, hder, False)
-        on = wc.func_bh_disk_crossing(y, 300.0, -0.02, alfa, beta, M, rho0, z0, MD, b, hder)
-        if on[1] < 40.0:  # no disk hit: both modes must agree exactly
-            assert list(on) == list(off)
-        else:
-            assert on[1] > 49.0
 
 
 EXAMPLES = sorted(Path("configs/examples").glob("*.toml"))
@@ -165,22 +148,22 @@ def test_retrace_points_matches_f_paral_weyl():
     wc.load_matrix(str(gm.ensure_matrix(M, MD, b, 20)))
     rho0 = wc.solve_observer_rho(M, MD, b, z0=z0)
     h = 0.05
-    alfa, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
+    alpha, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
     ii, jj = _random_pixels(n)
     for disk in (False, True):
-        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alfa, beta, hder, disk)
-        rm, rz = wc.retrace_points(rho0, z0, M, MD, b, alfa, beta, ii, jj, hder, disk)
+        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk)
+        rm, rz = wc.retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk)
         assert np.array_equal(rm, Mat[ii, jj]) and np.array_equal(rz, Mz[ii, jj])
 
 
 def test_retrace_points_matches_f_paral_kerr():
-    import kerr_core as kc
+    from bh_shadows.core import kerr_core as kc
 
     r0, theta0, a, M, n = 50.0, np.pi / 2, 0.9, 1.0, 16
     h = 0.1
-    alfa, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
+    alpha, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
     ii, jj = _random_pixels(n)
-    full = kc.f_paral(r0, theta0, a, M, alfa, beta)
-    got = kc.retrace_points(r0, theta0, a, M, alfa, beta, ii, jj)
+    full = kc.f_paral(r0, theta0, a, M, alpha, beta)
+    got = kc.retrace_points(r0, theta0, a, M, alpha, beta, ii, jj)
     for f, g in zip(full, got, strict=True):
         assert np.array_equal(f[ii, jj], g, equal_nan=True)
