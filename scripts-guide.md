@@ -147,3 +147,14 @@ JSON: status counts, central-line shadow edges, centroid and half-widths. Option
 `--M --MD --a --theta0`, `--backend`, `--disk-visible`, `--n-grid`, `--matrices-dir`,
 `--raw-kerr-a` (trace `kerr_core` directly, allows a < 0), `--save-status`. One config per
 process.
+## GPU benchmark and agreement check
+
+```bash
+uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --n-grid 1200 --device gpu --chunk 32 --repeats 3
+uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --agree
+```
+
+The script times one config per process (n of 64 or less) and prints one JSON line: cold time,
+warm trace time, matrix time, dispatch max and mean, and fallback pixels. With `--agree` it traces
+on the CPU and then on the GPU with the same frozen table and prints the agreement metrics.
+`--matrices-dir` sets the matrix folder.

@@ -762,3 +762,28 @@ def f_paral(rho0, z0, M, MD, b, alfa, beta, hder, disk_visible=False):
             )
 
     return (Mat, Mz)
+
+
+@jit(nopython=True, parallel=True)
+def retrace_points(rho0, z0, M, MD, b, alfa, beta, ii, jj, hder, disk_visible=False):
+    """Re-trace the k pixels `(alfa[ii[k]], beta[jj[k]])` in parallel; same rays as `f_paral`."""
+    k = len(ii)
+    Mat = np.zeros(k)
+    Mz = np.zeros(k)
+
+    for p in prange(k):
+        i = ii[p]
+        j = jj[p]
+        y = np.array(
+            [
+                rho0,
+                dr(rho0, z0, M, MD, b, alfa[i], beta[j]),
+                z0,
+                dthe(rho0, z0, M, MD, b, alfa[i]),
+            ]
+        )
+        (Mat[p], Mz[p]) = func(
+            y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
+        )
+
+    return (Mat, Mz)
