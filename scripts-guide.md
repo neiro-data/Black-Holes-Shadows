@@ -129,8 +129,8 @@ uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 16
 - **Cores:** the runner uses 80% of the system cores (at least 1) for numba. The count is stored
   in `run.json` as `numba_threads`.
 - **Output folder:** `runs/<YYYYMMDD_HHMMSS>_<name>/` (local time). Each run gets its own folder.
-- **Files:** `config.resolved.toml`, `run.json`, `status.txt`, `coord1.txt`, `coord2.txt`,
-  `phi.txt` (Kerr), `image.png`.
+- **Files:** `config.resolved.toml`, `run.json`, `outputs.npz` (keys `status`, `coord1`, `coord2`,
+  `phi` for Kerr), `image.png`.
 - **Visuals:** set `[plot] background` (see [SCHEMA.md](SCHEMA.md#config-keys--plot)); the image
   is composed from the saved arrays by `visuals.py`. Examples:
   `uv run python run_shadow.py configs/examples/visual_two_color.toml --n 16`, and likewise

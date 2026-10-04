@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 import visuals
 import weyl_core as wc
-from generate_matriz import ensure_matrix
+from generate_matriz import ensure_matrix, matrix_path
 from gpu_backend import resolve_device
 from shadow_config import ShadowConfig
 from weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
@@ -77,6 +77,12 @@ def _trace_weyl(
     cfg: ShadowConfig, progress: bool = True, chunk: int | None = None
 ) -> dict[str, np.ndarray]:
     """Trace one quadrant (static, equatorially symmetric) and mirror both axes."""
+    log.info(
+        "weyl run: lambda matrix %s",
+        "found (cached)"
+        if matrix_path(cfg.M, cfg.MD, cfg.b, cfg.n_grid).exists()
+        else "not found, building now (may take a while for quadrature)",
+    )
     mpath = ensure_matrix(cfg.M, cfg.MD, cfg.b, cfg.n_grid, cfg.matrix_source)
     wc.load_matrix(str(mpath))  # must precede the first trace
     z0 = 0.0
@@ -256,16 +262,26 @@ def save_run(
 ) -> None:
     run_dir = cfg.run_dir
     cfg.write_resolved()
-    np.savetxt(run_dir / "status.txt", out["status"], fmt="%d")
-    for key in ("coord1", "coord2", "phi"):
-        if key in out:
-            np.savetxt(run_dir / f"{key}.txt", out[key])
+    log.info("saving outputs.npz to %s", run_dir)
+    t0 = time.perf_counter()
+    np.savez_compressed(
+        run_dir / "outputs.npz",
+        **{k: out[k] for k in ("status", "coord1", "coord2", "phi") if k in out},
+    )
+    log.info("outputs.npz saved in %.1fs", time.perf_counter() - t0)
     if cfg.save or cfg.show:
+        log.info("rendering image (background=%s, n=%d)", cfg.background, cfg.n)
+        t0 = time.perf_counter()
         img_path = run_dir / "image.png" if cfg.save else None
         if cfg.background == "palette":
             plot_status(out["status"], cfg, img_path)
         else:
             visuals.render_image(out, cfg, img_path)
+        log.info(
+            "image done in %.1fs%s",
+            time.perf_counter() - t0,
+            f", saved {img_path}" if img_path else "",
+        )
     meta = cfg.to_metadata() | {
         "config_path": config_path,
         "elapsed_s": elapsed_s,
@@ -282,9 +298,11 @@ def save_run(
             "numpy": np.__version__,
             "numba": numba.__version__,
         },
+        "outputs": "outputs.npz",
         "status": "completed",
     }
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2) + "\n")
+    log.info("run complete: %s", run_dir)
 
 
 def parse_args(argv=None) -> tuple[str, dict]:
@@ -309,6 +327,9 @@ def parse_args(argv=None) -> tuple[str, dict]:
 
 
 def main(argv=None) -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     cfg_path, overrides = parse_args(argv)
     no_progress = overrides.pop("no_progress", False)  # runner option, not a config field
     cfg = ShadowConfig.from_toml(cfg_path, overrides)
@@ -317,6 +338,7 @@ def main(argv=None) -> None:
         f"run_id={cfg.run_id} backend={cfg.backend} disk_visible={cfg.disk_visible} "
         f"run_dir={cfg.run_dir} threads={threads}"
     )
+    log.info("tracing %dx%d rays (backend=%s)", cfg.n, cfg.n, cfg.backend)
     t0 = time.time()
     out = trace_grid(cfg, progress=not no_progress)
     elapsed = time.time() - t0

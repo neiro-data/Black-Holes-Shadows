@@ -149,7 +149,7 @@ def test_light_theta_obs_moves_peak():
 def test_from_config_theta_obs_weyl():
     from shadow_config import ShadowConfig
 
-    cfg = ShadowConfig(MD=0.1)
+    cfg = ShadowConfig(M=0.9, MD=0.1)
     assert v.VisualSpec.from_config(cfg).theta_obs == pytest.approx(HALF_PI)
     kerr = ShadowConfig(a=0.9, theta0=60.0)
     assert v.VisualSpec.from_config(kerr).theta_obs == pytest.approx(np.deg2rad(60.0))
