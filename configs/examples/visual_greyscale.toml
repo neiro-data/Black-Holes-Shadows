@@ -6,7 +6,7 @@
 name = "visual_greyscale"
 
 [spacetime]
-M  = 1.0
+M  = 0.9
 a  = 0.0
 MD = 0.1
 b  = 6.0

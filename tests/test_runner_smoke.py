@@ -28,6 +28,7 @@ def test_shipped_configs_smoke(cfg_file):
     if cfg_file == "schwarzschild_disk":
         ov["source_opt"] = "analytic"  # keeps the table cheap; physics path is the same
         ov["MD"] = 0.0
+        ov["M"] = 1.0
         ov["disk_visible_opt"] = True
     cfg = sc.ShadowConfig.from_toml(f"configs/{cfg_file}.toml", ov)
     out = rs.trace_grid(cfg)
@@ -70,7 +71,15 @@ def test_func_disk_off_matches_wrapper_on_nodisk_rays():
 
 
 EXAMPLES = sorted(Path("configs/examples").glob("*.toml"))
-TINY = {"n": 8, "n_grid": 20, "MD": 0.0, "source_opt": "analytic", "parallel": False, "show": False}
+TINY = {
+    "n": 8,
+    "n_grid": 20,
+    "M": 1.0,
+    "MD": 0.0,
+    "source_opt": "analytic",
+    "parallel": False,
+    "show": False,
+}
 
 
 def _tiny(path, **extra):
@@ -120,3 +129,17 @@ def test_palette_still_uses_plot_status(monkeypatch):
     )
     rs.save_run(cfg2, out)
     assert calls[-1] == "visuals" and len(calls) == 2
+
+
+@pytest.mark.parametrize("cfg_file", ["schwarzschild_nodisk", "kerr_a0.9_nodisk"])
+def test_save_run_writes_npz(cfg_file):
+    cfg = sc.ShadowConfig.from_toml(
+        f"configs/{cfg_file}.toml", {"n": 8, "n_grid": 20, "parallel": False, "show": False}
+    )
+    out = rs.trace_grid(cfg, progress=False)
+    rs.save_run(cfg, out)
+    npz = np.load(cfg.run_dir / "outputs.npz")
+    assert {"status", "coord1", "coord2"} <= set(npz.files)
+    assert ("phi" in npz.files) == (cfg.backend == "kerr")
+    assert np.array_equal(npz["status"], out["status"])
+    assert not list(cfg.run_dir.glob("*.txt"))

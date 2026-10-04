@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 
 import numpy as np
 import pytest
@@ -15,18 +16,27 @@ def write_cfg(tmp_path, body):
 
 
 def test_overrides_and_routing(tmp_path):
-    p = write_cfg(tmp_path, "[spacetime]\nMD = 0.1\n")
+    p = write_cfg(tmp_path, "[spacetime]\nM = 0.9\nMD = 0.1\n")
     cfg = ShadowConfig.from_toml(p)
     assert cfg.backend == "weyl" and cfg.disk_visible and cfg.matrix_source == "quadrature"
-    cfg = ShadowConfig.from_toml(p, {"MD": 0.0})
+    cfg = ShadowConfig.from_toml(p, {"M": 1.0, "MD": 0.0})
     assert not cfg.disk_visible and cfg.matrix_source == "analytic"
-    cfg = ShadowConfig.from_toml(p, {"MD": 0.0, "a": 0.9})
+    cfg = ShadowConfig.from_toml(p, {"M": 1.0, "MD": 0.0, "a": 0.9})
     assert cfg.backend == "kerr"
 
 
 @pytest.mark.parametrize(
     "ov",
-    [{"a": 1.0}, {"a": -0.1}, {"MD": -1.0}, {"b": 0.0}, {"n": 7}, {"a": 0.5, "MD": 0.1}],
+    [
+        {"a": 1.0},
+        {"a": -0.1},
+        {"MD": -1.0},
+        {"b": 0.0},
+        {"n": 7},
+        {"a": 0.5, "M": 0.9, "MD": 0.1},
+        {"M": 0.5},
+        {"palette": "nope"},
+    ],
 )
 def test_validation_errors(tmp_path, ov):
     with pytest.raises(ValueError):
@@ -46,6 +56,16 @@ def test_matrix_sidecar_mismatch(tmp_path, monkeypatch):
     path.with_suffix(".json").write_text(json.dumps({"M": 2.0}))
     with pytest.raises(ValueError):
         gm.ensure_matrix(1.0, 0.0, 6.0, 20)
+
+
+def test_ensure_matrix_logs_build_then_cache(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(gm, "MATRICES_DIR", tmp_path)
+    caplog.set_level(logging.INFO, logger="generate_matriz")
+    gm.ensure_matrix(1.0, 0.0, 6.0, 20)
+    assert "built in" in caplog.text
+    caplog.clear()
+    gm.ensure_matrix(1.0, 0.0, 6.0, 20)
+    assert "cached" in caplog.text and "built in" not in caplog.text
 
 
 def test_timestamp_validation_and_run_dir(tmp_path):

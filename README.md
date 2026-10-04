@@ -20,6 +20,8 @@ Details:
 - **GPU:** optional MLX backend for Kerr and Weyl (`--device gpu`); see "GPU backend" below.
 - **Entry points:** `generate_matriz.py` for the Weyl family, which must run first.
   `lensing_r_theta.py` for the Kerr family.
+- **Run outputs:** each run dir holds one `outputs.npz` with the keys `status`, `coord1`, `coord2` (and `phi` for Kerr). Load it with `np.load`. There are no `.txt` outputs.
+- **Matrix build on GPU:** not supported. The quadrature path uses scalar adaptive `scipy.quad`, which does not port to MLX. The analytic path (MD == 0) takes milliseconds. The GPU path only reads the matrix.
 - **Host requirements:** `uv` only. numba compiles on the first run of a script.
 
 ## GPU backend (optional, Apple Silicon, Kerr and Weyl)
@@ -78,7 +80,7 @@ Each Weyl tracer selects its spacetime through the disk mass `MD`, at the top of
 | Mode | Set | Load |
 | --- | --- | --- |
 | Black hole only | `MD = 0.0` | A matrix tabulated with `MD = 0.0`. |
-| Black hole and disk | `MD > 0.0` | The matching matrix, for example `MD = 0.1`. |
+| Black hole and disk | `MD > 0.0` | The matching matrix, for example `M = 0.9, MD = 0.1`. `M + MD` must be 1.0. |
 
 The name of the loaded matrix must match the chosen `MD`. Change `MD` and the argument of
 `wc.load_matrix(...)` together.

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import tomllib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+from weyl_plot import PALETTES
 
 BACKGROUNDS = ("palette", "black_hole", "two_color", "greyscale", "four_color", "image")
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
@@ -60,6 +63,12 @@ class ShadowConfig:
     def __post_init__(self) -> None:
         if not _STAMP_RE.fullmatch(self.timestamp):
             raise ValueError(f"timestamp must be YYYYMMDD_HHMMSS, got {self.timestamp!r}")
+        if self.palette not in PALETTES:
+            raise ValueError(f"palette must be one of {sorted(PALETTES)}, got {self.palette!r}")
+        if not math.isclose(self.M + self.MD, 1.0, abs_tol=1e-9):
+            raise ValueError(
+                f"M + MD must equal 1.0 (no disk: M = 1.0, MD = 0.0), got M={self.M}, MD={self.MD}"
+            )
         if not 0 <= self.a < 1:
             raise ValueError(f"a must satisfy 0 <= a < 1, got {self.a}")
         if self.MD < 0:

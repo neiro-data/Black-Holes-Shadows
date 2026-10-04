@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import time
 from pathlib import Path
 
 import numpy as np
 
 from weyl_core import lamb_Mat
+
+log = logging.getLogger(__name__)
 
 MATRICES_DIR = Path("matrices")
 EXTENT = 40.0  # the grid spans z in [40, -40] and rho in [40, 0]
@@ -68,9 +72,24 @@ def ensure_matrix(M: float, MD: float, b: float, n_grid: int, source: str = "aut
     if path.exists():
         if not sidecar.exists() or json.loads(sidecar.read_text()) != params:
             raise ValueError(f"{path} does not match the requested parameters {params}")
+        log.info("lambda matrix cached, loading %s", path)
         return path
+    if source == "auto":
+        source = "analytic" if MD == 0 else "quadrature"
+    log.info(
+        "building lambda matrix M=%s MD=%s b=%s n_grid=%d source=%s -> %s",
+        M,
+        MD,
+        b,
+        n_grid,
+        source,
+        path,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, lam=build_lambda_matrix(M, MD, b, n_grid, source))
+    t0 = time.perf_counter()
+    lam = build_lambda_matrix(M, MD, b, n_grid, source)
+    np.savez_compressed(path, lam=lam)
+    log.info("lambda matrix built in %.1fs, saved %s", time.perf_counter() - t0, path)
     sidecar.write_text(json.dumps(params))
     return path
 
@@ -83,4 +102,7 @@ if __name__ == "__main__":
     p.add_argument("--n-grid", type=int, default=1200)
     p.add_argument("--source", default="auto", choices=["auto", "analytic", "quadrature"])
     args = p.parse_args()
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     print(ensure_matrix(args.M, args.MD, args.b, args.n_grid, args.source))
