@@ -15,8 +15,8 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 DEVICES = ("auto", "cpu", "gpu")
-# `auto` stays on the CPU until the Weyl kernel lands and agreement tests pass for both
-# spacetimes; flipping this one flag makes `auto` prefer the GPU.
+# Both spacetimes (Kerr, Weyl) have GPU kernels with CPU-vs-GPU agreement tests, but `auto` stays
+# on the CPU until timing data justifies it; flipping this one flag makes `auto` prefer the GPU.
 AUTO_PREFERS_GPU = False
 THREADGROUP = 256
 
