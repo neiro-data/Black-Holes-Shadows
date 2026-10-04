@@ -222,6 +222,12 @@ def render_image(
     h = cfg.half_angle
     fig = plt.figure(figsize=(10, 10))
     plt.imshow(rgb, origin="lower", extent=(-h, h, -h, h))
+    if cfg.shadow_edge:
+        from shadow_edge import draw_edge
+
+        draw_edge(plt.gca(), cfg)
+        plt.xlim(-h, h)
+        plt.ylim(-h, h)
     plt.title(f"$M={cfg.M}$, $a={cfg.a}$, $M_D={cfg.MD}$, $b={cfg.b}$ ({cfg.backend})", size=20)
     plt.xlabel("$-\\beta$", size=20)
     plt.ylabel("$\\alpha$", size=20)

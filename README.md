@@ -133,7 +133,34 @@ Weyl backend has no traced phi, so left/right and grid phi lines use a flat-sky 
 `light_source = true` adds a white glow behind the black hole (two_color/four_color), which lenses into a bright ring. Keys
 are in [SCHEMA.md](SCHEMA.md#config-keys--plot); examples are in `configs/examples/`.
 
+`[plot] shadow_edge = true` (default `false`) draws the analytic shadow edge as a dashed cyan
+curve: the Schwarzschild circle for `a = 0`, the Kerr curve for `a != 0`. It draws nothing for a Weyl
+disk (`MD > 0`).
+
 See [scripts-guide.md — Colormaps](scripts-guide.md#colormaps).
+
+## Validation
+
+`tests/test_physics_validation.py` traces small grids (n <= 64) through
+`scripts/validate_physics.py` and checks the shadow against theory. Each trace runs in its own
+process. Measured on CPU, observer r0 = 15, theta0 = 90 deg, h = 0.588 rad. Pitch p = 2h/(n-1).
+
+| Check | Setup | Measured | Pass criterion |
+|---|---|---|---|
+| V2 Schwarzschild edge | n=64, p=0.0187; Weyl and Kerr a=0 | 0.3360 rad on all four sides (theory 0.3283; error 0.4 p) | within 1 p |
+| V3 shadow pixels vs MD | n=32, n_grid=200 for MD>0; (M, MD) = (1, 0), (0.95, 0.05), (0.9, 0.1), (0.7, 0.3) | 240, 216, 208, 140; no status-3 pixels | monotone; first step <= 20% (is 10%) |
+| V3 disk class | same | disk pixels 0, 288, 260, 288; 0 with `disk_visible=false` | only when the disk is visible |
+| V4 spin shift | n=64, Kerr a=0.9 vs a=0 | centroid +0.126 rad along -beta (6.8 p); alpha edges +-0.2987 | shift > 1 p |
+| V4 flattening | same | half-widths 0.168 (left) and 0.429 (right) | differ by >= 1 p |
+| V4 mirror | raw `kerr_core` a=-0.9 vs a=0.9 flipped along beta | 0 mismatched pixels | <= 1% |
+| Overlay | n=64, a=0.9, 128 boundary pixels | 100% within 1.5 p (70% within 1 p) | >= 95% within 1.5 p |
+
+Notes:
+
+- With MD = 0, a coarse `n_grid` (200 or 400) makes the Weyl tracer take minutes or more at n=32 to
+  64. Use the default `n_grid` there; it takes about 5 s.
+- `ShadowConfig` rejects `a < 0`, so the mirror check calls `kerr_core.f_paral` directly
+  (`--raw-kerr-a`).
 
 ## Data files
 

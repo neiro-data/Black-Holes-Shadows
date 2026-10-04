@@ -76,6 +76,7 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 | `light_source` | bool | `false` | white glow behind the black hole; only with `two_color`, `four_color` |
 | `light_alpha` | float | `0.7` | 0 to 1; glow peak opacity |
 | `light_radius_deg` | float | `10.0` | > 0; Gaussian sigma of the glow, in degrees |
+| `shadow_edge` | bool | `false` | draw the analytic shadow edge (none for Weyl with `MD > 0`) |
 | `image` | path | `""` | required for `background = "image"`; relative to the config file; equirectangular sky |
 | `save`, `show` | bool | `true`, `false` | as before |
 

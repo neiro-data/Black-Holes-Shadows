@@ -140,6 +140,13 @@ uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 16
   `matrix_source`, `n_grid`, `palette`, `elapsed_s`, `shadow_pixels`, `numba_threads`,
   `versions`, `status`.
 
+## validate_physics.py
+
+`uv run python scripts/validate_physics.py --n 64 --a 0.9` traces one grid (n <= 64) and prints
+JSON: status counts, central-line shadow edges, centroid and half-widths. Options: `--config`,
+`--M --MD --a --theta0`, `--backend`, `--disk-visible`, `--n-grid`, `--matrices-dir`,
+`--raw-kerr-a` (trace `kerr_core` directly, allows a < 0), `--save-status`. One config per
+process.
 ## GPU benchmark and agreement check
 
 ```bash

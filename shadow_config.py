@@ -55,6 +55,7 @@ class ShadowConfig:
     light_alpha: float = 0.7
     light_radius_deg: float = 10.0
     image_path: str = ""
+    shadow_edge: bool = False
     save: bool = True
     show: bool = False
     # run identity (local time; not read from / written to TOML)
@@ -185,6 +186,7 @@ class ShadowConfig:
             "light_source": self.light_source,
             "light_alpha": self.light_alpha,
             "light_radius_deg": self.light_radius_deg,
+            "shadow_edge": self.shadow_edge,
         }
 
     @classmethod
@@ -226,6 +228,7 @@ class ShadowConfig:
             "light_source",
             "light_alpha",
             "light_radius_deg",
+            "shadow_edge",
             "save",
             "show",
         ):
@@ -254,6 +257,7 @@ class ShadowConfig:
             f"light_source = {str(d['light_source']).lower()}\n"
             f"light_alpha = {d['light_alpha']}\nlight_radius_deg = {d['light_radius_deg']}\n"
             f"image = {json.dumps(d['image_path'])}\n"
+            f"shadow_edge = {str(d['shadow_edge']).lower()}\n"
             f"save = {str(d['save']).lower()}\nshow = {str(d['show']).lower()}\n"
         )
 
