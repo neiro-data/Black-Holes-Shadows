@@ -139,3 +139,15 @@ uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 16
   `a`, `MD`, `b`, `distance`, `theta0`, `n`, `half_angle`, `disk_visible`, `parallel`,
   `matrix_source`, `n_grid`, `palette`, `elapsed_s`, `shadow_pixels`, `numba_threads`,
   `versions`, `status`.
+
+## GPU benchmark and agreement check
+
+```bash
+uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --n-grid 1200 --device gpu --chunk 32 --repeats 3
+uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --agree
+```
+
+The script times one config per process (n of 64 or less) and prints one JSON line: cold time,
+warm trace time, matrix time, dispatch max and mean, and fallback pixels. With `--agree` it traces
+on the CPU and then on the GPU with the same frozen table and prints the agreement metrics.
+`--matrices-dir` sets the matrix folder.

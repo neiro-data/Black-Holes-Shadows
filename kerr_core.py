@@ -590,3 +590,31 @@ def x(r, a, M, theta, r0):
             )
         )
     )
+
+
+@jit(nopython=True, parallel=True)
+def retrace_points(r0, theta0, a, M, alfa, beta, ii, jj):
+    """Re-trace the k pixels `(alfa[ii[k]], beta[jj[k]])` in parallel; same rays as `f_paral`."""
+    k = len(ii)
+    Mr = np.zeros(k)
+    Mthet = np.zeros(k)
+    Mphi = np.zeros(k)
+    Mstat = np.zeros(k, dtype=np.int64)
+
+    for p in prange(k):
+        i = ii[p]
+        j = jj[p]
+        y = np.array(
+            [
+                r0,
+                dr(r0, a, M, theta0, alfa[i], beta[j]),
+                theta0,
+                dthe(r0, a, M, theta0, alfa[i]),
+                0.0,
+            ]
+        )
+        (Mr[p], Mthet[p], Mphi[p], Mstat[p]) = func_status(
+            y, 300.0, -0.02, alfa[i], beta[j], a, M, r0, theta0
+        )
+
+    return (Mr, Mthet, Mphi, Mstat)

@@ -143,3 +143,44 @@ def test_save_run_writes_npz(cfg_file):
     assert ("phi" in npz.files) == (cfg.backend == "kerr")
     assert np.array_equal(npz["status"], out["status"])
     assert not list(cfg.run_dir.glob("*.txt"))
+
+
+def test_serial_path_validates_device():
+    """A bad `device_opt` must raise even when parallel=false (post-init validation bypassed)."""
+    cfg = sc.ShadowConfig.from_toml("configs/kerr_a0.9_nodisk.toml", {"n": 8, "parallel": False})
+    object.__setattr__(cfg, "device_opt", "bogus")
+    with pytest.raises(ValueError, match="device must be"):
+        rs._resolve_run_device(cfg)
+    object.__setattr__(cfg, "device_opt", "gpu")
+    assert rs._resolve_run_device(cfg) == "cpu"
+
+
+def _random_pixels(n, k=12, seed=0):
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, n, k), rng.integers(0, n, k)
+
+
+def test_retrace_points_matches_f_paral_weyl():
+    M, MD, b, z0, hder, n = 1.0, 0.0, 6.0, 0.0, 1e-6, 16
+    wc.load_matrix(str(gm.ensure_matrix(M, MD, b, 20)))
+    rho0 = wc.solve_observer_rho(M, MD, b, z0=z0)
+    h = 0.05
+    alfa, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
+    ii, jj = _random_pixels(n)
+    for disk in (False, True):
+        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alfa, beta, hder, disk)
+        rm, rz = wc.retrace_points(rho0, z0, M, MD, b, alfa, beta, ii, jj, hder, disk)
+        assert np.array_equal(rm, Mat[ii, jj]) and np.array_equal(rz, Mz[ii, jj])
+
+
+def test_retrace_points_matches_f_paral_kerr():
+    import kerr_core as kc
+
+    r0, theta0, a, M, n = 50.0, np.pi / 2, 0.9, 1.0, 16
+    h = 0.1
+    alfa, beta = np.linspace(-h, h, n), np.linspace(h, -h, n)
+    ii, jj = _random_pixels(n)
+    full = kc.f_paral(r0, theta0, a, M, alfa, beta)
+    got = kc.retrace_points(r0, theta0, a, M, alfa, beta, ii, jj)
+    for f, g in zip(full, got, strict=True):
+        assert np.array_equal(f[ii, jj], g, equal_nan=True)

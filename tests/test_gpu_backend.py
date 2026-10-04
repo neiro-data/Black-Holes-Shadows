@@ -189,6 +189,23 @@ def test_weyl_probe_matches_cpu(MD, tmp_path, monkeypatch):
     np.testing.assert_allclose(nz, cpu[:, 3], rtol=1e-3, atol=1e-5)
 
 
+# |z| below the GPU stencil step (1e-3): a central difference would straddle the nuD kink at z=0.
+WEYL_POINTS_NEAR_PLANE = np.array([[7.5, 5e-4], [12.0, -2e-4], [4.0, 3e-4], [20.0, -9e-4]])
+
+
+def test_weyl_probe_near_disk_plane(tmp_path, monkeypatch):
+    _gpu_or_skip()
+    import weyl_gpu as wg
+
+    MD = 0.1
+    M, b, lam = _weyl_setup(tmp_path, monkeypatch, MD)
+    _frozen_or_skip(lam)
+    pts = WEYL_POINTS_NEAR_PLANE
+    nz = wg.probe_gpu(pts, M, MD, b, lam)[3]
+    cpu = np.array([wc.derNU(r, z, M, MD, b, 1, 2, 1e-6) for r, z in pts])
+    np.testing.assert_allclose(nz, cpu, rtol=1e-3, atol=1e-5)
+
+
 @pytest.mark.parametrize("MD", WEYL_CASES)
 def test_weyl_geo_rhs_matches_cpu(MD, tmp_path, monkeypatch):
     _gpu_or_skip()
@@ -314,5 +331,60 @@ def test_weyl_gpu_agrees_with_cpu(cfg_file, tmp_path, monkeypatch):
     for k in ("coord1", "coord2"):
         assert np.median(np.abs(cpu[k][both_escape] - gpu[k][both_escape])) < 1e-3
     both_disk = (sc_ == 2) & (sg == 2)
-    if both_disk.any():
+    # The seeded MD=0 table makes this a CPU-vs-GPU test, not a physics test (real table: H7).
+    if cfg_file == "schwarzschild_disk":
+        assert (sc_ == 2).sum() > 0
+        assert both_disk.sum() >= 0.9 * (sc_ == 2).sum()
         assert np.median(np.abs(cpu["coord1"][both_disk] - gpu["coord1"][both_disk])) < 1e-2
+    else:
+        assert not (sc_ == 2).any()
+
+
+def test_gpu_run_json_has_dispatch_stats(tmp_path, monkeypatch):
+    _gpu_or_skip()
+    import json
+
+    monkeypatch.setattr(sc, "RUNS_DIR", tmp_path / "runs")
+    cfg = sc.ShadowConfig.from_toml(
+        "configs/kerr_a0.9_nodisk.toml", {"n": 16, "device_opt": "gpu", "name": "stats"}
+    )
+    out = rs.trace_grid(cfg, progress=False, chunk=4)
+    rs.save_run(cfg, out, elapsed_s=1.0)
+    meta = json.loads((cfg.run_dir / "run.json").read_text())
+    assert meta["device"] == "gpu"
+    assert meta["gpu_chunk_rows"] == 4
+    assert meta["gpu_dispatch_s_max"] >= meta["gpu_dispatch_s_mean"] > 0
+    assert {"retrace_s", "gpu_cpu_fallback_pixels"} <= meta.keys()
+
+
+def _bench(*argv):
+    import subprocess
+    import sys
+
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "scripts/gpu_bench.py", *argv], capture_output=True, text=True
+    )
+
+
+def test_gpu_bench_rejects_large_n():
+    res = _bench("--config", "configs/kerr_a0.9_nodisk.toml", "--n", "128")
+    assert res.returncode != 0
+    assert "--n must be <= 64" in res.stderr
+
+
+def test_weyl_gpu_agrees_real_quadrature_table(tmp_path):
+    """Fresh process (own frozen `Mat_nu`) with a real quadrature table, n_grid=200."""
+    import json
+
+    _gpu_or_skip()
+    res = _bench(
+        *("--config", "configs/schwarzschild_disk.toml", "--n", "64", "--n-grid", "200"),
+        *("--agree", "--matrices-dir", str(tmp_path)),
+    )
+    assert res.returncode == 0, res.stderr[-2000:]
+    m = json.loads(res.stdout.strip().splitlines()[-1])
+    assert m["status_mismatch_frac"] <= 0.01
+    assert m["mismatch_off_boundary"] == 0
+    assert m["cpu_disk_pixels"] > 0
+    assert m["median_dcoord1_escape"] < 1e-3 and m["median_dcoord2_escape"] < 1e-3
+    assert m["median_dcoord1_disk"] < 1e-2
