@@ -84,6 +84,12 @@ def plot_status(status: np.ndarray, cfg, path=None):
         origin="lower",
         extent=[-h, h, -h, h],
     )
+    if getattr(cfg, "shadow_edge", False):
+        from shadow_edge import draw_edge
+
+        draw_edge(plt.gca(), cfg)
+        plt.xlim(-h, h)
+        plt.ylim(-h, h)
     plt.title(f"$M={cfg.M}$, $a={cfg.a}$, $M_D={cfg.MD}$, $b={cfg.b}$ ({cfg.backend})", size=20)
     plt.xlabel("$-\\beta$", size=20)
     plt.ylabel("$\\alpha$", size=20)
