@@ -85,16 +85,47 @@ def _trace_weyl(
     alfa_f, beta_f = _angles(cfg)
     half = cfg.n // 2
     alfa, beta = alfa_f[:half], beta_f[:half]
+    device = resolve_device(cfg.device_opt, cfg.parallel) if cfg.parallel else "cpu"
+    RUN_STATS["device"] = device
     if cfg.parallel:
-        Mat, Mz = _chunked_rows(
-            lambda s, e: wc.f_paral(
-                rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[s:e], beta, HDER, cfg.disk_visible
-            ),
+        if device == "gpu":
+            import weyl_gpu
+
+            def tracer(s, e):
+                return weyl_gpu.f_paral_gpu(
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[s:e], beta, cfg.disk_visible, wc.Mat_nu
+                )
+        else:
+
+            def tracer(s, e):
+                return wc.f_paral(
+                    rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[s:e], beta, HDER, cfg.disk_visible
+                )
+
+        Mat, Mz, *gpu_st = _chunked_rows(
+            tracer,
             half,
             progress=progress,
-            desc="weyl",
-            chunk=chunk,
+            desc="weyl-gpu" if device == "gpu" else "weyl",
+            chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
         )
+        if device == "gpu":  # float32 failures (status 3) are re-traced in float64 on the CPU
+            fail = gpu_st[0] == 3
+            RUN_STATS["gpu_cpu_fallback_pixels"] = int(fail.sum())
+            for i, j in zip(*np.nonzero(fail), strict=True):
+                y = np.array(
+                    [
+                        rho0,
+                        wc.dr(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i], beta[j]),
+                        z0,
+                        wc.dthe(rho0, z0, cfg.M, cfg.MD, cfg.b, alfa[i]),
+                    ]
+                )
+                Mat[i, j], Mz[i, j] = wc.func(
+                    y, 300.0, -0.02, alfa[i], beta[j], cfg.M, rho0, z0, cfg.MD, cfg.b, HDER,
+                    cfg.disk_visible,
+                )  # fmt: skip
+            log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
         Mat, Mz = np.zeros((half, half)), np.zeros((half, half))
         for i in tqdm(range(half), unit="row", desc="weyl", disable=not progress):
@@ -145,7 +176,7 @@ def _trace_kerr(
     mirror = cfg.theta0 == 90.0
     alfa_t = alfa[: cfg.n // 2] if mirror else alfa
 
-    device = resolve_device(cfg.device_opt, cfg.parallel)
+    device = resolve_device(cfg.device_opt, cfg.parallel) if cfg.parallel else "cpu"
     RUN_STATS["device"] = device
     if cfg.parallel:
         if device == "gpu":
@@ -212,7 +243,6 @@ def trace_grid(
     `chunk` = rows per `f_paral` call in the parallel path (default: numba thread count).
     """
     RUN_STATS.clear()
-    RUN_STATS["device"] = "cpu"  # the Weyl path has no GPU kernel yet
     trace = _trace_weyl if cfg.backend == "weyl" else _trace_kerr
     return trace(cfg, progress=progress, chunk=chunk)
 

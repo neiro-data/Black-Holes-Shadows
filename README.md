@@ -17,21 +17,22 @@ Details:
 - **What it does:** the Weyl family tabulates a lambda lookup matrix once, traces rays against
   it, and plots the result. The Kerr driver integrates on its own. The numerics use an RKF45
   integrator under numba, with `prange` in the production tracer.
-- **GPU:** optional MLX backend for Kerr (`--device gpu`); see "GPU backend" below.
+- **GPU:** optional MLX backend for Kerr and Weyl (`--device gpu`); see "GPU backend" below.
 - **Entry points:** `generate_matriz.py` for the Weyl family, which must run first.
   `lensing_r_theta.py` for the Kerr family.
 - **Host requirements:** `uv` only. numba compiles on the first run of a script.
 
-## GPU backend (optional, Apple Silicon, Kerr only)
+## GPU backend (optional, Apple Silicon, Kerr and Weyl)
 
-An MLX Metal kernel (float32) can trace Kerr rays instead of the numba `prange` path.
+An MLX Metal kernel (float32) can trace Kerr and Weyl (Schwarzschild) rays instead of the numba `prange` path.
 
 ```bash
 uv sync --extra gpu
 uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --device gpu
+uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64 --device gpu
 ```
 
-- Set it with `[tracer] device = "auto|cpu|gpu"` or `--device`. `auto` resolves to `cpu` for now.
+- Set it with `[tracer] device = "auto|cpu|gpu"` or `--device`. `auto` resolves to `cpu` for now (`AUTO_PREFERS_GPU` stays `False`).
 - `gpu` without MLX or an Apple GPU logs a warning and runs on the CPU.
 - Rays that fail in float32 (status 3) are re-traced on the CPU. `run.json` records `device`
   and `gpu_cpu_fallback_pixels`.

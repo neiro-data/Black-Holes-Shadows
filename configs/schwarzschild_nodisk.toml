@@ -1,6 +1,7 @@
 # Example: plain Schwarzschild black hole (MD = 0, no disk), Weyl coordinates.
 # Run:     uv run python run_shadow.py configs/schwarzschild_nodisk.toml --n 64
-# Device:  CPU only (numba); the GPU backend covers Kerr, so `--device gpu` falls back to CPU here.
+# Device:  CPU (numba) by default; `--device gpu` runs the float32 Metal kernel on Apple Silicon
+#          (needs `uv sync --extra gpu`; falls back to CPU, with a warning, if unavailable).
 # Output:  runs/<timestamp>_<name>/ (status/coord1/coord2 txt, image.png, run.json)
 name = "schwarzschild_nodisk"
 
