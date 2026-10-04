@@ -3,6 +3,7 @@
 # Fast check with the cached MD=0 matrix and the disk forced on:
 #   uv run python run_shadow.py configs/examples/visual_two_color.toml --n 48 --MD 0.0 --disk-visible true
 # disk_alpha (0..1): disk opacity; the disk is blended over a fixed neutral grey (no direction behind it).
+# light_source = true: white glow behind the black hole, lensed into a ring (light_alpha, light_radius_deg).
 
 name = "visual_two_color"
 
@@ -25,3 +26,6 @@ source = "auto"
 [plot]
 background = "two_color"
 disk_alpha = 0.6
+light_source = true
+light_alpha = 0.7
+light_radius_deg = 10.0

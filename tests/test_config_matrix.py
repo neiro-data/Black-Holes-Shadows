@@ -97,6 +97,47 @@ def test_disk_alpha_bounds_accepted(tmp_path):
         assert ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"disk_alpha": alpha})
 
 
+@pytest.mark.parametrize("bg", ["palette", "black_hole", "greyscale"])
+def test_light_source_needs_two_or_four_color(tmp_path, bg):
+    with pytest.raises(ValueError, match="light_source"):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"background": bg, "light_source": True})
+
+
+def test_light_source_with_image_raises(tmp_path):
+    png = _png(tmp_path)
+    with pytest.raises(ValueError, match="light_source"):
+        ShadowConfig.from_toml(
+            write_cfg(tmp_path, ""),
+            {"background": "image", "image_path": str(png), "light_source": True},
+        )
+
+
+@pytest.mark.parametrize(
+    "key,val", [("light_alpha", -0.1), ("light_alpha", 1.1), ("light_radius_deg", 0)]
+)
+def test_light_params_rejected(tmp_path, key, val):
+    with pytest.raises(ValueError, match=key):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), {key: val})
+
+
+def test_light_bounds_accepted(tmp_path):
+    for alpha in (0.0, 1.0):
+        assert ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"light_alpha": alpha})
+
+
+def test_light_keys_roundtrip_and_run_json(tmp_path):
+    body = (
+        '[plot]\nbackground = "four_color"\nlight_source = true\n'
+        "light_alpha = 0.4\nlight_radius_deg = 7.5\n"
+    )
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, body))
+    back = ShadowConfig.from_toml(write_cfg(tmp_path, cfg.to_toml()))
+    got = (back.light_source, back.light_alpha, back.light_radius_deg)
+    assert got == (True, 0.4, 7.5)
+    meta = cfg.to_metadata()
+    assert (meta["light_source"], meta["light_alpha"], meta["light_radius_deg"]) == (True, 0.4, 7.5)
+
+
 def test_relative_image_resolves_against_config_dir(tmp_path):
     sub = tmp_path / "cfgs"
     sub.mkdir()
