@@ -9,7 +9,7 @@ resolution-markers = [
 [[package]]
 name = "black-holes-shadows-one-shot-effort-medium-low"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numba" },

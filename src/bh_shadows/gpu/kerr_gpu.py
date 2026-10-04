@@ -1,15 +1,15 @@
 """Kerr null-geodesic tracer on the Apple GPU (MLX Metal kernel, float32, one thread per pixel).
 
-Port of `kerr_core.py` (metric, Christoffels, `geo`, RKF45, `func_status`). Differences from the
-CPU float64 path, forced by float32: `hmin = -1e-5`, a retry cap, a per-ray step cap, and
-non-finite state -> status 3. Status 3 pixels are re-traced on the CPU by the runner.
+Port of `kerr_core` (metric, Christoffel symbols, `geo`, RKF45, `func_status`). Changes for
+float32: `hmin = -1e-5`, a retry limit, a step limit for each ray, and status 3 for a non-finite
+state. The runner traces status-3 pixels again on the CPU. See docs/GPU.md.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-import gpu_backend as gb
+from bh_shadows.gpu import backend as gb
 
 HMIN_GPU = -1e-5
 MAX_STEPS = 200_000
@@ -106,7 +106,7 @@ inline float C323(float r, float am, float M, float th) {
   return (3*a4 + 8*a2*M*r + 8*a2*r2 + 8*r2*r2
           + 4*a2*(a2 + 2*r*(r - M))*cos(2*th) + a4*cos(4*th))/(tan(th)*2*d2*d2); }
 
-// Observer-dependent momenta (constant along a ray); alfa/beta are the pixel angles.
+// Observer-dependent momenta (constant along a ray); alpha/beta are the pixel angles.
 inline float gamma_(float r, float am, float M, float th) {
   float gp = gpp_(r, am, M, th), gt = gtp_(r, am, M, th);
   return (-gt/gp)*sqrt(gp/(gt*gt - gtt_(r, am, M, th)*gp)); }
@@ -163,16 +163,16 @@ inline float rkf(thread const float* y, float h, thread const P& p, thread float
 }
 
 // Pixel initial state and observer momenta.
-inline void init_ray(float alfa, float beta, thread P& p, thread float* y) {
+inline void init_ray(float alpha, float beta, thread P& p, thread float* y) {
   float am = p.a*p.M, M = p.M, r0 = p.r0, th0 = p.th0;
   float gp = gpp_(r0, am, M, th0);
-  p.pphi = sqrt(gp)*sin(beta)*cos(alfa);
-  p.pt = -(1 + gamma_(r0, am, M, th0)*sqrt(gp)*sin(beta)*cos(alfa))/zeta_(r0, am, M, th0);
+  p.pphi = sqrt(gp)*sin(beta)*cos(alpha);
+  p.pt = -(1 + gamma_(r0, am, M, th0)*sqrt(gp)*sin(beta)*cos(alpha))/zeta_(r0, am, M, th0);
   float g_th = den(r0, am, th0);
   y[0] = r0;
-  y[1] = sqrt(grr_(r0, am, M, th0))*cos(beta)*cos(alfa)*Dl(r0, am, M)/den(r0, am, th0);
+  y[1] = sqrt(grr_(r0, am, M, th0))*cos(beta)*cos(alpha)*Dl(r0, am, M)/den(r0, am, th0);
   y[2] = th0;
-  y[3] = sqrt(g_th)*sin(alfa)/den(r0, am, th0);
+  y[3] = sqrt(g_th)*sin(alpha)/den(r0, am, th0);
   y[4] = 0;
 }
 """
@@ -180,12 +180,12 @@ inline void init_ray(float alfa, float beta, thread P& p, thread float* y) {
 _TRACE = f"""
 uint idx = thread_position_in_grid.x;
 uint nb = (uint)beta_shape[0];
-uint total = (uint)alfa_shape[0]*nb;
+uint total = (uint)alpha_shape[0]*nb;
 if (idx >= total) return;
 P p;
 p.a = prm[0]; p.M = prm[1]; p.r0 = prm[2]; p.th0 = prm[3];
 float y[5];
-init_ray(alfa[idx / nb], beta[idx % nb], p, y);
+init_ray(alpha[idx / nb], beta[idx % nb], p, y);
 float r_h = 1.01f*p.M*(1 + sqrt(1 - p.a*p.a));
 float h = -0.02f, hmin = {HMIN_GPU!r}f;
 int st = 1;
@@ -227,16 +227,33 @@ for (int i = 0; i < 5; i++) out[idx*5 + i] = o[i];
 """
 
 
-def f_paral_gpu(r0, theta0, a, M, alfa, beta):
-    """GPU twin of `kerr_core.f_paral`: (r, theta, phi, status), each (len(alfa), len(beta))."""
-    alfa = np.asarray(alfa)
+def f_paral_gpu(r0, theta0, a, M, alpha, beta):
+    """Trace one ray for each pixel on the GPU. GPU version of `kerr_core.f_paral`.
+
+    Parameters
+    ----------
+    r0, theta0 : float
+        Observer radius and polar angle (radians).
+    a, M : float
+        Spin parameter and mass.
+    alpha, beta : np.ndarray
+        Pixel angles.
+
+    Returns
+    -------
+    r, theta, phi : np.ndarray
+        End state, of shape (len(alpha), len(beta)).
+    status : np.ndarray
+        0 escaped, 1 captured, 3 failed in float32 (trace again on the CPU).
+    """
+    alpha = np.asarray(alpha)
     beta = np.asarray(beta)
-    na, nb = len(alfa), len(beta)
+    na, nb = len(alpha), len(beta)
     res = gb.launch(
         "kerr_trace",
         _HEADER,
         _TRACE,
-        {"alfa": alfa, "beta": beta, "prm": np.array([a, M, r0, theta0])},
+        {"alpha": alpha, "beta": beta, "prm": np.array([a, M, r0, theta0])},
         {"out_r": np.float32, "out_th": np.float32, "out_phi": np.float32, "out_st": np.int32},
         na * nb,
     )
@@ -249,14 +266,31 @@ def f_paral_gpu(r0, theta0, a, M, alfa, beta):
     )
 
 
-def geo_gpu(states, r0, theta0, a, M, alfa, beta):
-    """Evaluate the GPU geodesic RHS at `states` (k, 5); for validation against `kc.geo`."""
+def geo_gpu(states, r0, theta0, a, M, alpha, beta):
+    """Evaluate the geodesic right-hand side on the GPU. For tests against `kerr_core.geo`.
+
+    Parameters
+    ----------
+    states : array_like
+        States `[r, dr, theta, dtheta, phi]` of shape (k, 5).
+    r0, theta0 : float
+        Observer radius and polar angle (radians).
+    a, M : float
+        Spin parameter and mass.
+    alpha, beta : float
+        Pixel angles of the ray.
+
+    Returns
+    -------
+    np.ndarray
+        Derivatives of shape (k, 5).
+    """
     states = np.asarray(states, dtype=np.float32).reshape(-1, 5)
     res = gb.launch(
         "kerr_geo",
         _HEADER,
         _GEO,
-        {"zin": states.ravel(), "prm": np.array([a, M, r0, theta0, alfa, beta])},
+        {"zin": states.ravel(), "prm": np.array([a, M, r0, theta0, alpha, beta])},
         {"out": np.float32},
         len(states),
         out_len=states.size,

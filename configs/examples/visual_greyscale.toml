@@ -1,7 +1,7 @@
 # Greyscale sky: uniform grey background, opaque white disk, black shadow.
 # Schwarzschild + disk (MD = 0.1). `grid = true` is allowed here: grid lines go on the grey sky only.
 # Fast check with the cached MD=0 matrix and the disk forced on:
-#   uv run python run_shadow.py configs/examples/visual_greyscale.toml --n 48 --MD 0.0 --disk-visible true
+#   uv run bh-shadow configs/examples/visual_greyscale.toml --n 48 --MD 0.0 --disk-visible true
 
 name = "visual_greyscale"
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-"""Tabulate the non-linear lambda-potential lookup matrix for the Weyl-family ray tracers.
+"""Build the lambda look-up table for the Weyl tracers.
 
-`build_lambda_matrix` is the single implementation. The runner (`run_shadow.py`) calls
-`ensure_matrix`, which caches by content under `matrices/` with a JSON sidecar holding the
-parameters. The `__main__` block is a thin CLI over the same functions.
+`build_lambda_matrix` is the only implementation. The runner calls `ensure_matrix`. That function
+keeps one table for each parameter set in `matrices/`, with a JSON sidecar that holds the
+parameters.
+
+    uv run bh-matrix --M 0.9 --MD 0.1 --b 6.0
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from weyl_core import lamb_Mat
+from bh_shadows.core.weyl_core import lamb_Mat
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +27,20 @@ EXTENT = 40.0  # the grid spans z in [40, -40] and rho in [40, 0]
 
 
 def _lamb_sch_grid(rho: np.ndarray, z: np.ndarray, M: float) -> np.ndarray:
-    """Vectorised copy of `weyl_core.lambSch` (the analytic lambda for MD = 0)."""
+    """Calculate the analytic Schwarzschild lambda on a grid (vector form of `lambSch`).
+
+    Parameters
+    ----------
+    rho, z : np.ndarray
+        Weyl coordinates. The arrays must broadcast together.
+    M : float
+        Black-hole mass.
+
+    Returns
+    -------
+    np.ndarray
+        Lambda values. Points on the axis segment give NaN or -inf.
+    """
     d1 = np.sqrt(rho**2 + (z - M) ** 2)
     d2 = np.sqrt(rho**2 + (z + M) ** 2)
     sigma = np.sqrt((rho**2 + z**2 + M**2) ** 2 - 4 * z**2 * M**2)
@@ -36,7 +51,28 @@ def _lamb_sch_grid(rho: np.ndarray, z: np.ndarray, M: float) -> np.ndarray:
 def build_lambda_matrix(
     M: float, MD: float, b: float, n_grid: int, source: str = "auto"
 ) -> np.ndarray:
-    """Return the (n_grid x n_grid) lambda table, rows over z (40 -> -40), columns over rho."""
+    """Build the lambda look-up table.
+
+    Parameters
+    ----------
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    n_grid : int
+        Number of grid points on each axis.
+    source : {"auto", "analytic", "quadrature"}, optional
+        Build method. "auto" uses "analytic" when `MD == 0`, else "quadrature".
+
+    Returns
+    -------
+    np.ndarray
+        Table of shape (n_grid, n_grid). Rows go over z from 40 to -40. Columns go over rho from
+        40 to 0. NaN values are set to -20.
+
+    Raises
+    ------
+    ValueError
+        If `source` is unknown, or if `source="analytic"` and `MD != 0`.
+    """
     if source == "auto":
         source = "analytic" if MD == 0 else "quadrature"
     z = np.linspace(EXTENT, -EXTENT, n_grid)
@@ -61,11 +97,45 @@ def build_lambda_matrix(
 
 
 def matrix_path(M: float, MD: float, b: float, n_grid: int) -> Path:
+    """Return the cache path of one lambda table.
+
+    Parameters
+    ----------
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    n_grid : int
+        Number of grid points on each axis.
+
+    Returns
+    -------
+    Path
+        `MATRICES_DIR / "lambda_M{M}_MD{MD}_b{b}_n{n_grid}.npz"`.
+    """
     return MATRICES_DIR / f"lambda_M{M}_MD{MD}_b{b}_n{n_grid}.npz"
 
 
 def ensure_matrix(M: float, MD: float, b: float, n_grid: int, source: str = "auto") -> Path:
-    """Return the cached matrix path, building it if missing. Refuse a sidecar mismatch."""
+    """Return the path of a cached lambda table. Build the table if it does not exist.
+
+    Parameters
+    ----------
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    n_grid : int
+        Number of grid points on each axis.
+    source : {"auto", "analytic", "quadrature"}, optional
+        Build method if the table does not exist.
+
+    Returns
+    -------
+    Path
+        Path of the `.npz` file. A `.json` sidecar beside it holds the parameters.
+
+    Raises
+    ------
+    ValueError
+        If the file exists but its sidecar is missing or has other parameters.
+    """
     path = matrix_path(M, MD, b, n_grid)
     sidecar = path.with_suffix(".json")
     params = {"M": M, "MD": MD, "b": b, "n_grid": n_grid}
@@ -94,7 +164,8 @@ def ensure_matrix(M: float, MD: float, b: float, n_grid: int, source: str = "aut
     return path
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Build or reuse one lambda table from the command line, then print its path."""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--M", type=float, default=1.0)
     p.add_argument("--MD", type=float, default=0.0)
@@ -106,3 +177,7 @@ if __name__ == "__main__":
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     print(ensure_matrix(args.M, args.MD, args.b, args.n_grid, args.source))
+
+
+if __name__ == "__main__":
+    main()

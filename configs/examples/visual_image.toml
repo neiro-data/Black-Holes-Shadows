@@ -1,7 +1,7 @@
 # Image sky: an equirectangular picture is mapped onto the sky and lensed by the hole.
 # Schwarzschild, no disk; reuses the cached MD=0 matrix. `image` is resolved relative to THIS file.
 # sky_checker.png (128 x 64) is a checkerboard so the lensing distortion is easy to see.
-# Run:  uv run python run_shadow.py configs/examples/visual_image.toml --n 48
+# Run:  uv run bh-shadow configs/examples/visual_image.toml --n 48
 # Weyl has no phi: left/right comes from the pixel column (flat-sky approximation, see SCHEMA.md).
 
 name = "visual_image"

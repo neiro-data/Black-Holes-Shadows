@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import numpy as np
 
-import gpu_backend as gb
-import weyl_core as wc
+from bh_shadows.core import weyl_core as wc
+from bh_shadows.gpu import backend as gb
 
 HDER_GPU = 1e-3
 HMIN_GPU = -1e-5
@@ -179,24 +179,24 @@ inline void load_p(const device float* prm, int ni, int nj, const device float* 
 }}
 
 // Pixel initial state; sets p.pphi (observer momenta are constants along the ray).
-inline void init_ray(float alfa, float beta, thread P& p, thread float* y) {{
-  p.pphi = sqrt(p.gpp0)*sin(beta)*cos(alfa);
+inline void init_ray(float alpha, float beta, thread P& p, thread float* y) {{
+  p.pphi = sqrt(p.gpp0)*sin(beta)*cos(alpha);
   y[0] = p.rho0;
-  y[1] = cos(alfa)*cos(beta)/sqrt(p.grr0);
+  y[1] = cos(alpha)*cos(beta)/sqrt(p.grr0);
   y[2] = p.z0;
-  y[3] = sin(alfa)/sqrt(p.gzz0);
+  y[3] = sin(alpha)/sqrt(p.gzz0);
 }}
 """
 
 _TRACE = f"""
 uint idx = thread_position_in_grid.x;
 uint nb = (uint)beta_shape[0];
-uint total = (uint)alfa_shape[0]*nb;
+uint total = (uint)alpha_shape[0]*nb;
 if (idx >= total) return;
 P p;
 load_p(prm, (int)lam_shape[0], (int)lam_shape[1], lam, p);
 float y[4];
-init_ray(alfa[idx / nb], beta[idx % nb], p, y);
+init_ray(alpha[idx / nb], beta[idx % nb], p, y);
 float hmin = {HMIN_GPU!r}f, h = -0.02f;
 float orho = y[0], oz = y[2];
 int st = 0;
@@ -264,6 +264,23 @@ for (int i = 0; i < 4; i++) out[idx*4 + i] = o[i];
 
 
 def _check_lam(lam) -> np.ndarray:
+    """Make sure that the lambda table is loaded.
+
+    Parameters
+    ----------
+    lam : array_like
+        Lambda table.
+
+    Returns
+    -------
+    np.ndarray
+        The table as an array.
+
+    Raises
+    ------
+    ValueError
+        If the table is not 2-D or is the (4, 4) placeholder.
+    """
     lam = np.asarray(lam)
     if lam.ndim != 2 or lam.shape == (4, 4):
         raise ValueError(
@@ -273,7 +290,22 @@ def _check_lam(lam) -> np.ndarray:
 
 
 def _observer_prm(rho0, z0, M, MD, b, disk_visible) -> list[float]:
-    """Host float64 observer constants: [rho0, z0, M, MD, b, pt, gpp0, vis, grr0, gzz0]."""
+    """Calculate the observer constants on the host in float64.
+
+    Parameters
+    ----------
+    rho0, z0 : float
+        Observer position.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    disk_visible : bool
+        Stop rays at the disk.
+
+    Returns
+    -------
+    list of float
+        `[rho0, z0, M, MD, b, pt, gpp0, vis, grr0, gzz0]`.
+    """
     gtt0 = wc.gtt(rho0, z0, M, MD, b)
     return [
         rho0,
@@ -289,20 +321,39 @@ def _observer_prm(rho0, z0, M, MD, b, disk_visible) -> list[float]:
     ]
 
 
-def f_paral_gpu(rho0, z0, M, MD, b, alfa, beta, disk_visible, lam):
-    """GPU twin of `weyl_core.f_paral`: (Mat, Mz, status), each (len(alfa), len(beta)).
+def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
+    """Trace one ray for each pixel on the GPU. GPU version of `weyl_core.f_paral`.
 
-    `status` is 0 (terminated normally) or 3 (float32 failure; re-trace on the CPU).
+    Parameters
+    ----------
+    rho0, z0 : float
+        Observer position.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    alpha, beta : np.ndarray
+        Pixel angles.
+    disk_visible : bool
+        Stop rays at the disk.
+    lam : np.ndarray
+        Lambda table (`weyl_core.Mat_nu`).
+
+    Returns
+    -------
+    Mat, Mz : np.ndarray
+        End rho and end z, of shape (len(alpha), len(beta)). The sentinels are the same as in
+        `weyl_core.func`.
+    status : np.ndarray
+        0 done, 3 failed in float32 (trace again on the CPU).
     """
     lam = _check_lam(lam)
-    alfa, beta = np.asarray(alfa), np.asarray(beta)
-    na, nb = len(alfa), len(beta)
+    alpha, beta = np.asarray(alpha), np.asarray(beta)
+    na, nb = len(alpha), len(beta)
     res = gb.launch(
         "weyl_trace",
         _HEADER,
         _TRACE,
         {
-            "alfa": alfa,
+            "alpha": alpha,
             "beta": beta,
             "prm": np.array(_observer_prm(rho0, z0, M, MD, b, disk_visible)),
             "lam": lam,
@@ -319,7 +370,22 @@ def f_paral_gpu(rho0, z0, M, MD, b, alfa, beta, disk_visible, lam):
 
 
 def probe_gpu(points, M, MD, b, lam):
-    """(nu, lamb, dnu/drho, dnu/dz) at `points` (k, 2) of (rho, z); for validation."""
+    """Evaluate the potentials on the GPU at given points. For tests.
+
+    Parameters
+    ----------
+    points : array_like
+        Points `(rho, z)` of shape (k, 2).
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    lam : np.ndarray
+        Lambda table.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        `nu`, `lamb`, `d nu / d rho` and `d nu / d z` at each point.
+    """
     pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
     k = len(pts)
     res = gb.launch(
@@ -333,10 +399,29 @@ def probe_gpu(points, M, MD, b, lam):
     return tuple(res[n].astype(np.float64) for n in ("out_nu", "out_lam", "out_nr", "out_nz"))
 
 
-def geo_gpu(states, rho0, z0, M, MD, b, alfa, beta, lam):
-    """Evaluate the GPU geodesic RHS at `states` (k, 4); for validation against `wc.geo`."""
+def geo_gpu(states, rho0, z0, M, MD, b, alpha, beta, lam):
+    """Evaluate the geodesic right-hand side on the GPU. For tests against `weyl_core.geo`.
+
+    Parameters
+    ----------
+    states : array_like
+        States `[rho, drho, z, dz]` of shape (k, 4).
+    rho0, z0 : float
+        Observer position.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    alpha, beta : float
+        Pixel angles of the ray.
+    lam : np.ndarray
+        Lambda table.
+
+    Returns
+    -------
+    np.ndarray
+        Derivatives of shape (k, 4).
+    """
     states = np.asarray(states, dtype=np.float32).reshape(-1, 4)
-    prm = np.array(_observer_prm(rho0, z0, M, MD, b, False) + [alfa, beta])
+    prm = np.array(_observer_prm(rho0, z0, M, MD, b, False) + [alpha, beta])
     res = gb.launch(
         "weyl_geo",
         _HEADER,

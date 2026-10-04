@@ -1,41 +1,26 @@
-"""Shared physics core for the Weyl-coordinate Schwarzschild BH + Morgan-Morgan disk family.
+"""Physics core of the Weyl family: Schwarzschild black hole with an optional Morgan-Morgan disk.
 
-All Weyl-family scripts (``test_parallel_SHADOW.py``, ``test_Z_SHADOW.py``,
-``test_symmetry_lensing.py``, ``symmetry.py``, ``generate_matriz.py``) import this module
-via ``from weyl_core import *`` instead of redefining the physics. This file is a
-deduplication of what used to be near-identical copies of the same functions pasted
-across those scripts; the canonical signatures kept here match ``test_parallel_SHADOW.py``
-(the production tracer), which is the only variant that keeps the ``m`` disk/BH selector.
+The runner and the GPU port use this module.
 
-Load-bearing conventions (do not "fix" these without re-deriving the physics):
+Shared parameters of the helpers:
 
-* **The ``m`` selector.** Wherever a potential function takes an ``m`` argument:
-  ``m == 0`` selects the pure Schwarzschild potential (``nuSch``, black hole only),
-  ``m == 1`` selects the pure Morgan-Morgan disk potential (``nuD``), and ``m == 2``
-  selects the combined BH + disk potential (``nuSch + nuD``). The geodesic/metric code
-  always calls with ``m == 2``; ``m == 0``/``m == 1`` exist so a caller can isolate a
-  single source (e.g. to build a BH-only lookup matrix by setting ``MD = 0``).
+- `rho`, `z`: Weyl coordinates.
+- `M`, `MD`, `b`: black-hole mass, disk mass and disk inner radius.
+- `alpha`, `beta`: pixel angles of the ray.
+- `l`: derivative axis. 0 is rho, 1 is z.
+- `m`: potential selector. 0 is the black hole only (`nuSch`), 1 is the disk only (`nuD`), 2 is
+  both. The geodesic code always uses 2.
+- `hder`: finite-difference step.
 
-* **The ``xi2`` ``np.abs`` guard.** ``xi2`` takes ``np.sqrt(np.abs(...))`` of the argument
-  of the outer square root. The un-guarded expression can go slightly negative due to
-  floating-point cancellation near the disk plane/axis; without the guard this raises
-  inside numba's ``nopython`` mode. This is intentional and must be kept.
+Rules. Do not change them without a new derivation of the physics:
 
-* **``load_matrix`` / the ``Mat_nu`` global.** ``lamb`` bilinearly interpolates the
-  precomputed non-linear lambda-potential lookup table into the module-level global
-  ``Mat_nu`` (built by ``generate_matriz.py`` via ``lamb_Mat``). Numba freezes globals
-  referenced inside a ``@jit(nopython=True)`` function at first compilation, so
-  ``load_matrix(path)`` **must** be called before the first traced ray (i.e. before the
-  first call into any function that transitively calls ``lamb``). The matrix is *not*
-  threaded through ``geo``/``func``/``f_paral`` signatures on purpose — that would require
-  passing a large read-only array through every recursive RK step, which is both slower
-  and a bigger churn to the numba-compiled call graph than the existing global.
-
-* **``parallel=True`` only on ``f_paral``.** It is the one function with a ``prange``
-  loop; every other jitted helper is scalar code numba cannot parallelize, and flagging it
-  ``parallel=True`` only raised ``NumbaPerformanceWarning``. The helpers are called from
-  inside the ``prange`` body (and from the serial driver ``test_Z_SHADOW.py``), so dropping
-  the flag there changes neither results nor parallel speed.
+- **`xi2` `np.abs` guard.** Rounding can make the radicand slightly negative near the disk plane.
+  Without the guard, numba raises an error.
+- **`Mat_nu` global.** `lamb` reads the lambda table from the global `Mat_nu`. Numba fixes the
+  global at the first compile. Call `load_matrix(path)` before the first trace. The table is not
+  a function argument, because each RK step would then pass a large array.
+- **`parallel=True` only on `f_paral` and `retrace_points`.** Only these functions have a
+  `prange` loop. On the scalar helpers, the flag only gives `NumbaPerformanceWarning`.
 """
 
 import math
@@ -59,43 +44,46 @@ Mat_nu = np.zeros((4, 4))
 
 
 def load_matrix(path: str) -> None:
-    """Load the tabulated lambda-potential matrix produced by generate_matriz.py (`.npz`, key
-    `lam`; any other suffix is read as legacy plain text).
+    """Load the lambda table into the global `Mat_nu`.
 
-    Must be called before the first ray trace: numba freezes the `Mat_nu` global the
-    first time a `@jit(nopython=True)` function referencing it is compiled.
+    Call this function before the first trace. Numba fixes `Mat_nu` when it first compiles a
+    function that reads it.
+
+    Parameters
+    ----------
+    path : str
+        `.npz` file with the key `lam` (from `bh_shadows.core.matrix`).
     """
     global Mat_nu
-    if str(path).endswith(".npz"):
-        with np.load(path) as f:
-            Mat_nu = f["lam"]
-    else:  # legacy plain-text tables
-        Mat_nu = np.loadtxt(path)
+    with np.load(path) as f:
+        Mat_nu = f["lam"]
 
 
 # ---------------------------------------------------------------------------
 # Numerical integration / differentiation helpers
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
-def simps(f, l, z, a, b, N, *args):
-    """Composite Simpson's rule integrator of `f` along axis `l` (0=first arg, 1=second)."""
-    if N % 2 == 1:
-        raise ValueError("N must be an even integer.")
-    dx = (b - a) / N
-    if l == 0:
-        x = np.linspace(a, b, N + 1)
-        y = f(x, z, *args)
-        S = dx / 3 * np.sum(y[0:-1:2] + 4 * y[1::2] + y[2::2])
-    elif l == 1:
-        x = np.linspace(a, b, N + 1)
-        y = f(z, x, *args)
-        S = dx / 3 * np.sum(y[0:-1:2] + 4 * y[1::2] + y[2::2])
-    return S
-
-
-@jit(nopython=True)
 def derivative(f, l, x, y, hder, *args):
-    """Central finite difference of `f` w.r.t. its first (l=0) or second (l=1) argument."""
+    """Calculate a central finite difference of `f`.
+
+    Parameters
+    ----------
+    f : callable
+        Function `f(x, y, *args)`.
+    l : {0, 1}
+        0 for d/dx, 1 for d/dy.
+    x, y : float
+        Evaluation point.
+    hder : float
+        Step. The function uses `abs(hder)`.
+    *args
+        Extra arguments of `f`.
+
+    Returns
+    -------
+    float
+        Derivative value.
+    """
     if l == 0:
         return 0.5 * (f(x + np.abs(hder), y, *args) - f(x - np.abs(hder), y, *args)) / np.abs(hder)
     elif l == 1:
@@ -109,11 +97,13 @@ def derivative(f, l, x, y, hder, *args):
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def d1(rho, z, M):
+    """Distance from (rho, z) to the rod end at z = +M."""
     return np.sqrt(rho**2 + (z - M) ** 2)
 
 
 @jit(nopython=True)
 def d2(rho, z, M):
+    """Distance from (rho, z) to the rod end at z = -M."""
     return np.sqrt(rho**2 + (z + M) ** 2)
 
 
@@ -122,11 +112,22 @@ def d2(rho, z, M):
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def xi2(R, z, a):
-    """Oblate-spheroidal-like coordinate used by the Morgan-Morgan disk potential.
+    """Return the spheroidal coordinate of the Morgan-Morgan disk potential.
 
-    Wrapped in `np.abs` (load-bearing, see module docstring): floating-point cancellation
-    can push the radicand's argument slightly negative near z=0, R>=a, which would
-    otherwise raise inside numba nopython mode.
+    The `np.abs` guard is necessary. Rounding can make the radicand slightly negative near z = 0,
+    R >= a. Without the guard, numba raises an error.
+
+    Parameters
+    ----------
+    R, z : float
+        Weyl coordinates.
+    a : float
+        Disk inner radius.
+
+    Returns
+    -------
+    float
+        Coordinate value.
     """
     return np.sqrt(
         np.abs(
@@ -138,7 +139,22 @@ def xi2(R, z, a):
 
 @jit(nopython=True)
 def nuD(R, z, M, a):
-    """Morgan-Morgan (inverted) thin-disk contribution to the nu potential."""
+    """Return the Morgan-Morgan (inverted) disk part of the nu potential.
+
+    Parameters
+    ----------
+    R, z : float
+        Weyl coordinates.
+    M : float
+        Disk mass.
+    a : float
+        Disk inner radius.
+
+    Returns
+    -------
+    float
+        Potential value.
+    """
     if xi2(R, z, a) == 0.0:
         return (
             M
@@ -199,7 +215,22 @@ def nuD(R, z, M, a):
 # m = 0 -> nuSch (BH only) ; m = 1 -> nuD (disk only) ; m = 2 -> nuSch + nuD (BH + disk)
 @jit(nopython=True)
 def nu(rho, z, M, MD, b, m):
-    """nu potential: BH (Schwarzschild), disk (Morgan-Morgan) or the sum, per the `m` selector."""
+    """Return the nu potential.
+
+    Parameters
+    ----------
+    rho, z : float
+        Weyl coordinates.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    m : {0, 1, 2}
+        0 black hole only, 1 disk only, 2 black hole and disk.
+
+    Returns
+    -------
+    float
+        Potential value.
+    """
     nuSch = math.log(
         (d1(rho, z, M) + d2(rho, z, M) - 2 * M) / (d1(rho, z, M) + d2(rho, z, M) + 2 * M)
     )
@@ -213,7 +244,7 @@ def nu(rho, z, M, MD, b, m):
 
 @jit(nopython=True)
 def lambSch(rho, z, M, MD, b):
-    """Analytic Schwarzschild lambda potential (used as the outer boundary value for lamb_Mat)."""
+    """Return the analytic Schwarzschild lambda. `lamb_Mat` uses it as the outer boundary value."""
     sigma = np.sqrt((rho**2 + z**2 + M**2) ** 2 - 4 * z**2 * M**2)
     return np.log(((d1(rho, z, M) + d2(rho, z, M)) ** 2 - 4 * M**2) / (4 * sigma))
 
@@ -223,14 +254,17 @@ def lambSch(rho, z, M, MD, b):
 # for the initial observer's rho via `scipy.optimize.fsolve`.
 # ---------------------------------------------------------------------------
 def d1_i(rho, z, M):
+    """Python version of `d1` (no numba). For `fsolve` only."""
     return np.sqrt(rho**2 + (z - M) ** 2)
 
 
 def d2_i(rho, z, M):
+    """Python version of `d2` (no numba). For `fsolve` only."""
     return np.sqrt(rho**2 + (z + M) ** 2)
 
 
 def xi2_i(R, z, a):
+    """Python version of `xi2` without the `np.abs` guard. For `fsolve` only."""
     return np.sqrt(
         (a**2 - R**2 - z**2 + np.sqrt((a**2 - R**2) ** 2 + 2 * (a**2 + R**2) * z**2 + z**4))
         / (R**2 + z**2)
@@ -238,6 +272,7 @@ def xi2_i(R, z, a):
 
 
 def nuD_i(R, z, M, a):
+    """Python version of `nuD` (no numba). For `fsolve` only."""
     if xi2_i(R, z, a) == 0.0:
         return (
             M
@@ -295,7 +330,7 @@ def nuD_i(R, z, M, a):
 
 
 def nu_i(rho, z, M, MD, b, m):
-    """Observer-frame nu potential (plain Python mirror of `nu`, used only for fsolve)."""
+    """Python version of `nu` (no numba). For `fsolve` only."""
     nuSch = math.log(
         (d1_i(rho, z, M) + d2_i(rho, z, M) - 2 * M) / (d1_i(rho, z, M) + d2_i(rho, z, M) + 2 * M)
     )
@@ -308,12 +343,29 @@ def nu_i(rho, z, M, MD, b, m):
 
 
 def gpp_i(rho, z, M, MD, b):
-    """Observer-frame g_phiphi metric component, used to solve for the initial observer rho."""
+    """Python version of `gpp` (no numba). For `fsolve` only."""
     return rho**2 * math.exp(-nu_i(rho, z, M, MD, b, 2))
 
 
 def solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0, R_initial_guess=10.0):
-    """Solve for the initial observer's rho such that sqrt(gpp) equals `target_gpp_sqrt`."""
+    """Find the observer rho where `sqrt(gpp)` has a given value.
+
+    Parameters
+    ----------
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    z0 : float, optional
+        Observer z.
+    target_gpp_sqrt : float, optional
+        Value of `sqrt(gpp)` (the circumferential radius of the observer).
+    R_initial_guess : float, optional
+        Start value for `fsolve`.
+
+    Returns
+    -------
+    float
+        Observer rho.
+    """
     func_initial = lambda R: np.sqrt(gpp_i(float(R[0]), z0, M, MD, b)) - target_gpp_sqrt  # noqa: E731
     R_solution = fsolve(func_initial, R_initial_guess)
     return float(R_solution[0])
@@ -324,11 +376,13 @@ def solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0, R_initial_guess=1
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def derNU(rho, z, M, MD, b, l, m, hder):
+    """Return d nu / d rho (`l = 0`) or d nu / d z (`l = 1`) by central difference."""
     return derivative(nu, l, rho, z, hder, M, MD, b, m)
 
 
 @jit(nopython=True)
 def dlamb(z, rho, M, MD, b, l, m, hder):
+    """Return component `l` of grad lambda (vacuum field equations). Order `(z, rho)` for `quad`."""
     if l == 0:
         return (
             0.5
@@ -341,6 +395,7 @@ def dlamb(z, rho, M, MD, b, l, m, hder):
 
 @jit(nopython=True)
 def dlamb2(rho, z, M, MD, b, l, m, hder):
+    """Return component `l` of grad lambda (vacuum field equations). Order `(rho, z)`."""
     if l == 0:
         return (
             0.5
@@ -353,10 +408,27 @@ def dlamb2(rho, z, M, MD, b, l, m, hder):
 
 @jit(forceobj=True)
 def lamb_Mat(rho, z, M, MD, b, m, hder):
-    """Tabulate the non-linear lambda potential by quadrature of dlamb/dlamb2.
+    """Calculate lambda at one point by quadrature of grad lambda.
 
-    Object-mode jit (scipy.integrate.quad is not numba-compilable in nopython mode).
-    Only used by generate_matriz.py to build the lookup matrix consumed by `lamb`.
+    The function integrates from the outer boundary (|z| = 40, rho = 40), where lambda has the
+    Schwarzschild value. It uses object mode, because numba cannot compile `scipy.integrate.quad`.
+    Only `bh_shadows.core.matrix` calls it.
+
+    Parameters
+    ----------
+    rho, z : float
+        Weyl coordinates.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    m : {0, 1, 2}
+        Potential selector (see `nu`).
+    hder : float
+        Finite-difference step.
+
+    Returns
+    -------
+    float
+        Lambda value.
     """
     limit = 0.0
     if z >= limit:
@@ -375,10 +447,21 @@ def lamb_Mat(rho, z, M, MD, b, m, hder):
 
 @jit(nopython=True)
 def lamb(rho, z, M, MD, b, m):
-    """Bilinear interpolation of the lambda potential from the loaded `Mat_nu` lookup table.
+    """Return lambda by bilinear interpolation in `Mat_nu`.
 
-    `m` is accepted for signature-compatibility with `nu` but not otherwise used: the
-    lookup table already encodes the combined BH+disk (m=2) potential it was tabulated with.
+    Parameters
+    ----------
+    rho, z : float
+        Weyl coordinates.
+    M, MD, b : float
+        Not used. The table already holds the potential.
+    m : int
+        Not used. It keeps the same signature as `nu`.
+
+    Returns
+    -------
+    float
+        Lambda value.
     """
     zref = 40
     Rref = 40
@@ -411,56 +494,67 @@ def lamb(rho, z, M, MD, b, m):
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def gtt(rho, z, M, MD, b):
+    """Return the metric component g_tt."""
     return -math.exp(nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
 def grr(rho, z, M, MD, b):
+    """Return the metric component g_rhorho."""
     return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
 def gzz(rho, z, M, MD, b):
+    """Return the metric component g_zz."""
     return math.exp(lamb(rho, z, M, MD, b, 2) - nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
 def gpp(rho, z, M, MD, b):
+    """Return the metric component g_phiphi."""
     return rho**2 * math.exp(-nu(rho, z, M, MD, b, 2))
 
 
 @jit(nopython=True)
 def zeta(rho, z, M, MD, b):
+    """Return `sqrt(-1 / g_tt)`, the lapse factor of the static observer."""
     return np.sqrt(-1 / gtt(rho, z, M, MD, b))
 
 
 @jit(nopython=True)
-def dthe(rho, z, M, MD, b, alfa):
-    return 1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alfa)
+def dthe(rho, z, M, MD, b, alpha):
+    """Return the initial dz / dlambda of the ray for pixel angle `alpha`."""
+    return 1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alpha)
 
 
 @jit(nopython=True)
-def dr(rho, z, M, MD, b, alfa, beta):
-    return 1 / np.sqrt(grr(rho, z, M, MD, b)) * np.cos(alfa) * np.cos(beta)
+def dr(rho, z, M, MD, b, alpha, beta):
+    """Return the initial drho / dlambda of the ray for pixel angles `alpha`, `beta`."""
+    return 1 / np.sqrt(grr(rho, z, M, MD, b)) * np.cos(alpha) * np.cos(beta)
 
 
 @jit(nopython=True)
-def Pphi(rho, z, M, MD, b, alfa, beta):
-    return np.sqrt(gpp(rho, z, M, MD, b)) * np.sin(beta) * np.cos(alfa)
+def Pphi(rho, z, M, MD, b, alpha, beta):
+    """Return the conserved momentum p_phi of the ray."""
+    return np.sqrt(gpp(rho, z, M, MD, b)) * np.sin(beta) * np.cos(alpha)
 
 
 @jit(nopython=True)
-def Pt(rho, z, M, MD, b, alfa, beta):
+def Pt(rho, z, M, MD, b, alpha, beta):
+    """Return the conserved momentum p_t of the ray."""
     return -1 / zeta(rho, z, M, MD, b)
 
 
 @jit(nopython=True)
-def dphi(rho, z, M, MD, b, alfa, beta, p_phi):
+def dphi(rho, z, M, MD, b, alpha, beta, p_phi):
+    """Return dphi / dlambda from p_phi."""
     return 1 / gpp(rho, z, M, MD, b) * p_phi
 
 
 @jit(nopython=True)
-def dt(rho, z, M, MD, b, alfa, beta, p_t):
+def dt(rho, z, M, MD, b, alpha, beta, p_t):
+    """Return dt / dlambda from p_t."""
     return 1 / gtt(rho, z, M, MD, b) * p_t
 
 
@@ -471,6 +565,34 @@ def dt(rho, z, M, MD, b, alfa, beta, p_t):
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
 def run_kut4_mod(F, x, y, h, *args):
+    """Do one adaptive RKF45 step.
+
+    The step control is the legacy one: `hmax = -0.04`, `hmin = -1e-7`, `tol = 1e-4`. The retry loop
+    compares `h < hmin` on negative steps and can do more than 500 retries. Keep it as it is: the
+    CPU results depend on it.
+
+    Parameters
+    ----------
+    F : callable
+        Right-hand side `F(x, y, *args)`.
+    x : float
+        Affine parameter.
+    y : np.ndarray
+        State.
+    h : float
+        Step size (negative).
+    *args
+        Extra arguments of `F`.
+
+    Returns
+    -------
+    h : float
+        Next step size.
+    x : float
+        New affine parameter.
+    y : np.ndarray
+        New state.
+    """
     hmax = -0.04
     hmin = -(10**-7)
     tol = 10**-4
@@ -557,23 +679,42 @@ def run_kut4_mod(F, x, y, h, *args):
 # ---------------------------------------------------------------------------
 # Geodesic RHS + single-ray tracers.
 #
-# Two state-vector variants exist:
-#  - geo/func: 4-state [rho, drho, z, dz] (no phi tracking) -- used by the parallel and
-#    serial shadow tracers (test_parallel_SHADOW.py, test_Z_SHADOW.py).
-#  - geo_lensing/func_lensing: 5-state [rho, drho, z, dz, phi] -- used by the lensing
-#    driver (test_symmetry_lensing.py) which also needs the accumulated phi coordinate.
+# State vector: [rho, drho, z, dz] (phi is not traced).
 # ---------------------------------------------------------------------------
 @jit(nopython=True)
-def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
-    """Geodesic RHS for the 4-state [rho, drho, z, dz] system (no phi tracking)."""
-    pphi = Pphi(rho0, z0, M, MD, b, alfa, beta)
-    pt = Pt(rho0, z0, M, MD, b, alfa, beta)
+def geo(t, z, M, alpha, beta, rho0, z0, MD, b, hder):
+    """Return the geodesic right-hand side for the state `[rho, drho, z, dz]`.
+
+    Parameters
+    ----------
+    t : float
+        Affine parameter (not used).
+    z : np.ndarray
+        State `[rho, drho, z, dz]`.
+    M : float
+        Black-hole mass.
+    alpha, beta : float
+        Pixel angles.
+    rho0, z0 : float
+        Observer position.
+    MD, b : float
+        Disk mass and disk inner radius.
+    hder : float
+        Finite-difference step.
+
+    Returns
+    -------
+    np.ndarray
+        Derivative of the state.
+    """
+    pphi = Pphi(rho0, z0, M, MD, b, alpha, beta)
+    pt = Pt(rho0, z0, M, MD, b, alpha, beta)
 
     d2Rdt = -(
         0.5
         * math.exp(2 * nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))
         * derNU(z[0], z[2], M, MD, b, 0, 2, hder)
-        * dt(z[0], z[2], M, MD, b, alfa, beta, pt) ** 2
+        * dt(z[0], z[2], M, MD, b, alpha, beta, pt) ** 2
         + 0.5
         * (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))
         * z[1] ** 2
@@ -587,14 +728,14 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
         * math.exp(-lamb(z[0], z[2], M, MD, b, 2))
         * z[0]
         * (-2 + z[0] * derNU(z[0], z[2], M, MD, b, 0, 2, hder))
-        * dphi(z[0], z[2], M, MD, b, alfa, beta, pphi) ** 2
+        * dphi(z[0], z[2], M, MD, b, alpha, beta, pphi) ** 2
     )
 
     d2Thedt = -(
         0.5
         * math.exp(2 * nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))
         * derNU(z[0], z[2], M, MD, b, 1, 2, hder)
-        * dt(z[0], z[2], M, MD, b, alfa, beta, pt) ** 2
+        * dt(z[0], z[2], M, MD, b, alpha, beta, pt) ** 2
         - 0.5
         * (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))
         * z[1] ** 2
@@ -608,19 +749,41 @@ def geo(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
         * math.exp(-lamb(z[0], z[2], M, MD, b, 2))
         * z[0] ** 2
         * derNU(z[0], z[2], M, MD, b, 1, 2, hder)
-        * dphi(z[0], z[2], M, MD, b, alfa, beta, pphi) ** 2
+        * dphi(z[0], z[2], M, MD, b, alpha, beta, pphi) ** 2
     )
 
     return np.array([z[1], d2Rdt, z[3], d2Thedt])
 
 
 @jit(nopython=True)
-def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
-    """Trace a single null geodesic (4-state) until it hits the BH, escapes, or crosses the disk.
+def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
+    """Trace one ray until it is captured, escapes or hits the disk.
 
-    Returns the final [rho, z] pair. The [0.001, 0.001] sentinel marks BH capture. With
-    `disk_visible=True`, a ray that crosses the disk plane outside rho = b stops with its z
-    offset by +50.0 (the disk-hit sentinel). With `disk_visible=False` the disk is ignored.
+    Parameters
+    ----------
+    y : np.ndarray
+        Initial state `[rho, drho, z, dz]`.
+    x : float
+        Initial affine parameter.
+    h : float
+        Initial step (negative: the ray goes back in time).
+    alpha, beta : float
+        Pixel angles.
+    M : float
+        Black-hole mass.
+    rho0, z0 : float
+        Observer position.
+    MD, b : float
+        Disk mass and disk inner radius.
+    hder : float
+        Finite-difference step.
+    disk_visible : bool
+        Stop the ray when it crosses the disk plane at rho > b.
+
+    Returns
+    -------
+    list of float
+        End `[rho, z]`. Sentinels: capture gives `[0.001, 0.001]`, a disk hit gives `[rho, z + 50]`.
     """
     y_prev = y
     yf = [y[0], y[2]]
@@ -629,7 +792,7 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
         nu(y[0], y[2], M, MD, b, 2) > -3.0
         and np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) < 30.0
     ):
-        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
+        (h, x, y) = run_kut4_mod(geo, x, y, h, M, alpha, beta, rho0, z0, MD, b, hder)
 
         if np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) >= 30.0:
             yf = [y[0], y[2]]
@@ -648,125 +811,72 @@ def func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, disk_visible):
     return yf
 
 
-@jit(nopython=True)
-def func_bh_disk_crossing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
-    """`func` with the disk always visible (kept for test_Z_SHADOW.py)."""
-    return func(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder, True)
-
-
-@jit(nopython=True)
-def geo_lensing(t, z, M, alfa, beta, rho0, z0, MD, b, hder):
-    """Geodesic RHS for the 5-state [rho, drho, z, dz, phi] system (lensing variant).
-
-    Same rho/z equations of motion as `geo`; adds dphi/dlambda so the accumulated phi
-    coordinate can be reported (needed to classify lensed image quadrants).
-    """
-    pphi = Pphi(rho0, z0, M, MD, b, alfa, beta)
-    pt = Pt(rho0, z0, M, MD, b, alfa, beta)
-
-    d2Rdt = -(
-        0.5
-        * math.exp(2 * nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))
-        * derNU(z[0], z[2], M, MD, b, 0, 2, hder)
-        * dt(z[0], z[2], M, MD, b, alfa, beta, pt) ** 2
-        + 0.5
-        * (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))
-        * z[1] ** 2
-        + (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))
-        * z[1]
-        * z[3]
-        - 0.5
-        * (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))
-        * z[3] ** 2
-        + 0.5
-        * math.exp(-lamb(z[0], z[2], M, MD, b, 2))
-        * z[0]
-        * (-2 + z[0] * derNU(z[0], z[2], M, MD, b, 0, 2, hder))
-        * dphi(z[0], z[2], M, MD, b, alfa, beta, pphi) ** 2
-    )
-
-    d2Thedt = -(
-        0.5
-        * math.exp(2 * nu(z[0], z[2], M, MD, b, 2) - lamb(z[0], z[2], M, MD, b, 2))
-        * derNU(z[0], z[2], M, MD, b, 1, 2, hder)
-        * dt(z[0], z[2], M, MD, b, alfa, beta, pt) ** 2
-        - 0.5
-        * (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))
-        * z[1] ** 2
-        + (dlamb2(z[0], z[2], M, MD, b, 0, 2, hder) - derNU(z[0], z[2], M, MD, b, 0, 2, hder))
-        * z[1]
-        * z[3]
-        + 0.5
-        * (dlamb2(z[0], z[2], M, MD, b, 1, 2, hder) - derNU(z[0], z[2], M, MD, b, 1, 2, hder))
-        * z[3] ** 2
-        + 0.5
-        * math.exp(-lamb(z[0], z[2], M, MD, b, 2))
-        * z[0] ** 2
-        * derNU(z[0], z[2], M, MD, b, 1, 2, hder)
-        * dphi(z[0], z[2], M, MD, b, alfa, beta, pphi) ** 2
-    )
-
-    dPhidt = 1 / gpp(z[0], z[2], M, MD, b) * pphi
-
-    return np.array([z[1], d2Rdt, z[3], d2Thedt, dPhidt])
-
-
-@jit(nopython=True)
-def func_lensing(y, x, h, alfa, beta, M, rho0, z0, MD, b, hder):
-    """Trace a single null geodesic (5-state, with phi) for the lensing driver.
-
-    Returns the final [rho, z, phi] triple.
-    """
-    Y = [y]
-
-    while (
-        nu(y[0], y[2], M, MD, b, 2) > -3.0
-        and np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) < 30.0
-    ):
-        (h, x, y) = run_kut4_mod(geo_lensing, x, y, h, M, alfa, beta, rho0, z0, MD, b, hder)
-        Y.append(y)
-
-        if np.sqrt(gpp(np.sqrt(y[0] ** 2 + y[2] ** 2), 0, M, MD, b)) >= 30.0:
-            yf = [Y[-1][0], Y[-1][2], Y[-1][4]]
-            break
-
-        elif nu(y[0], y[2], M, MD, b, 2) <= -3.0:
-            yf = [0.001, 0.001, 0.2]
-            break
-
-    return yf
-
-
 @jit(nopython=True, parallel=True)
-def f_paral(rho0, z0, M, MD, b, alfa, beta, hder, disk_visible=False):
-    """Production multicore driver: trace one ray per (alfa, beta) grid point in parallel.
+def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
+    """Trace one ray for each pixel on all CPU cores (numba `prange`).
 
-    Uses numba's `prange` (requires `parallel=True`, see module docstring) to
-    auto-parallelize the two nested angle loops.
+    Parameters
+    ----------
+    rho0, z0 : float
+        Observer position.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    alpha, beta : np.ndarray
+        Pixel angles.
+    hder : float
+        Finite-difference step.
+    disk_visible : bool, optional
+        Stop rays at the disk.
+
+    Returns
+    -------
+    Mat, Mz : np.ndarray
+        End rho and end z, of shape (len(alpha), len(beta)). See `func` for the sentinels.
     """
-    Mat = np.zeros((len(alfa), len(beta)))
-    Mz = np.zeros((len(alfa), len(beta)))
+    Mat = np.zeros((len(alpha), len(beta)))
+    Mz = np.zeros((len(alpha), len(beta)))
 
-    for i in prange(len(alfa)):
+    for i in prange(len(alpha)):
         for j in prange(len(beta)):
             y = np.array(
                 [
                     rho0,
-                    dr(rho0, z0, M, MD, b, alfa[i], beta[j]),
+                    dr(rho0, z0, M, MD, b, alpha[i], beta[j]),
                     z0,
-                    dthe(rho0, z0, M, MD, b, alfa[i]),
+                    dthe(rho0, z0, M, MD, b, alpha[i]),
                 ]
             )
             (Mat[i, j], Mz[i, j]) = func(
-                y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
+                y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
             )
 
     return (Mat, Mz)
 
 
 @jit(nopython=True, parallel=True)
-def retrace_points(rho0, z0, M, MD, b, alfa, beta, ii, jj, hder, disk_visible=False):
-    """Re-trace the k pixels `(alfa[ii[k]], beta[jj[k]])` in parallel; same rays as `f_paral`."""
+def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=False):
+    """Trace selected pixels again in parallel. The rays are the same as in `f_paral`.
+
+    Parameters
+    ----------
+    rho0, z0 : float
+        Observer position.
+    M, MD, b : float
+        Black-hole mass, disk mass and disk inner radius.
+    alpha, beta : np.ndarray
+        Pixel angles of the full grid.
+    ii, jj : np.ndarray
+        Row and column indices of the k pixels.
+    hder : float
+        Finite-difference step.
+    disk_visible : bool, optional
+        Stop rays at the disk.
+
+    Returns
+    -------
+    Mat, Mz : np.ndarray
+        End rho and end z, of shape (k,).
+    """
     k = len(ii)
     Mat = np.zeros(k)
     Mz = np.zeros(k)
@@ -777,13 +887,13 @@ def retrace_points(rho0, z0, M, MD, b, alfa, beta, ii, jj, hder, disk_visible=Fa
         y = np.array(
             [
                 rho0,
-                dr(rho0, z0, M, MD, b, alfa[i], beta[j]),
+                dr(rho0, z0, M, MD, b, alpha[i], beta[j]),
                 z0,
-                dthe(rho0, z0, M, MD, b, alfa[i]),
+                dthe(rho0, z0, M, MD, b, alpha[i]),
             ]
         )
         (Mat[p], Mz[p]) = func(
-            y, 300.0, -0.02, alfa[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
+            y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
         )
 
     return (Mat, Mz)

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from shadow_config import ShadowConfig
+    from bh_shadows.runner.shadow_config import ShadowConfig
 
 # Sign of phi_rel that means "left" in the image (fixed empirically against real runs).
 PHI_LEFT_SIGN = 1
@@ -47,7 +47,7 @@ _TWO_PI = 2 * np.pi
 
 @dataclass(frozen=True)
 class VisualSpec:
-    """Visual options for `compose_rgb` (mirrors the `[plot]` config keys)."""
+    """Visual options for `compose_rgb`. The fields follow the `[plot]` config keys."""
 
     background: str = "four_color"
     grid: bool = False
@@ -62,7 +62,18 @@ class VisualSpec:
 
     @classmethod
     def from_config(cls, cfg) -> VisualSpec:
-        """Build a spec from a `ShadowConfig`, loading the sky image when needed."""
+        """Make a spec from a config.
+
+        Parameters
+        ----------
+        cfg : ShadowConfig
+            Run config. The function loads the sky image when `background == "image"`.
+
+        Returns
+        -------
+        VisualSpec
+            Visual options.
+        """
         sky = load_sky_image(cfg.image_path) if cfg.background == "image" else None
         return cls(
             background=cfg.background,
@@ -79,7 +90,18 @@ class VisualSpec:
 
 
 def load_sky_image(path: str | Path) -> np.ndarray:
-    """Read a PNG/JPEG as float RGB (H, W, 3) in [0, 1], dropping any alpha channel."""
+    """Read a sky image.
+
+    Parameters
+    ----------
+    path : str or Path
+        PNG or JPEG file.
+
+    Returns
+    -------
+    np.ndarray
+        Float RGB array of shape (H, W, 3) in [0, 1]. Greyscale becomes RGB. Alpha is removed.
+    """
     import matplotlib.pyplot as plt
 
     img = np.asarray(plt.imread(path))
@@ -92,12 +114,41 @@ def load_sky_image(path: str | Path) -> np.ndarray:
 
 
 def _phi_rel(phi: np.ndarray) -> np.ndarray:
-    """Wrap phi - pi into (-pi, pi]."""
+    """Wrap `phi - pi` into (-pi, pi].
+
+    Parameters
+    ----------
+    phi : np.ndarray
+        Azimuth in radians.
+
+    Returns
+    -------
+    np.ndarray
+        Azimuth relative to the direction behind the observer.
+    """
     return np.pi - np.mod(np.pi - (np.asarray(phi, dtype=float) - np.pi), _TWO_PI)
 
 
 def sky_rgb(theta: np.ndarray, phi: np.ndarray, spec: VisualSpec) -> np.ndarray:
-    """Sky colour for escape directions, shape `theta.shape + (3,)` (NaN angles give grey)."""
+    """Return the sky colour for each escape direction.
+
+    Parameters
+    ----------
+    theta, phi : np.ndarray
+        Escape angles in radians. NaN angles give grey (or pixel (0, 0) of the image).
+    spec : VisualSpec
+        Visual options. Uses `background` and `sky`.
+
+    Returns
+    -------
+    np.ndarray
+        RGB values of shape `theta.shape + (3,)`.
+
+    Raises
+    ------
+    ValueError
+        If the background has no sky, or if `background == "image"` and `spec.sky` is None.
+    """
     theta = np.asarray(theta, dtype=float)
     rel = _phi_rel(phi)
     if spec.background == "greyscale":
@@ -122,10 +173,24 @@ def sky_rgb(theta: np.ndarray, phi: np.ndarray, spec: VisualSpec) -> np.ndarray:
 
 
 def grid_mask(theta: np.ndarray, phi: np.ndarray, step_deg: float, width_deg: float) -> np.ndarray:
-    """Boolean mask of celestial-sphere grid lines (theta and phi multiples of `step_deg`).
+    """Return the mask of the celestial-sphere grid lines.
 
-    Theta lines: `|theta - k*step| <= w`. Phi lines: `|dphi| * sin(theta) <= w`, which keeps the
-    apparent line width even near the poles.
+    A theta line is on `|theta - k*step| <= w`. A phi line is on `|dphi| * sin(theta) <= w`, which
+    keeps the line width constant near the poles.
+
+    Parameters
+    ----------
+    theta, phi : np.ndarray
+        Escape angles in radians.
+    step_deg : float
+        Line spacing in degrees.
+    width_deg : float
+        Half width of a line in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        True on a grid line.
     """
     theta = np.asarray(theta, dtype=float)
     step, w = np.deg2rad(step_deg), np.deg2rad(width_deg)
@@ -139,9 +204,26 @@ def grid_mask(theta: np.ndarray, phi: np.ndarray, step_deg: float, width_deg: fl
 def light_weight(
     theta: np.ndarray, phi: np.ndarray, theta_behind: float, radius_deg: float, alpha: float
 ) -> np.ndarray:
-    """Glow weight `alpha * exp(-d^2 / (2 sigma^2))` around the behind-observer point.
+    """Return the weight of the light-source glow.
 
-    `d` is the great-circle angle to (`theta_behind`, phi = pi); NaN angles give weight 0.
+    The weight is `alpha * exp(-d**2 / (2 * sigma**2))`. `d` is the great-circle angle to the point
+    (`theta_behind`, phi = pi).
+
+    Parameters
+    ----------
+    theta, phi : np.ndarray
+        Escape angles in radians.
+    theta_behind : float
+        Polar angle of the glow centre, in radians.
+    radius_deg : float
+        Glow radius `sigma` in degrees.
+    alpha : float
+        Peak weight.
+
+    Returns
+    -------
+    np.ndarray
+        Weight in [0, alpha]. NaN angles give 0.
     """
     theta = np.asarray(theta, dtype=float)
     phi = np.asarray(phi, dtype=float)
@@ -156,10 +238,22 @@ def light_weight(
 
 
 def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
-    """Escape angles (theta, phi) per pixel from a run's arrays; NaN where the ray did not escape.
+    """Return the escape angles of each pixel.
 
-    Kerr: theta = coord2, phi = phi. Weyl: theta = pi - atan2(rho, z) from coord1/coord2, and phi is
-    a flat-sky approximation `pi + PHI_LEFT_SIGN * beta` of the pixel column (no phi is traced).
+    Kerr uses `theta = coord2` and the traced `phi`. Weyl uses `theta = pi - atan2(rho, z)`. Weyl
+    does not trace phi, so the function uses the flat-sky value `pi + PHI_LEFT_SIGN * beta`.
+
+    Parameters
+    ----------
+    out : dict of str to np.ndarray
+        Run arrays (`status`, `coord1`, `coord2`, and `phi` for Kerr).
+    cfg : ShadowConfig
+        Run config. Uses `half_angle`.
+
+    Returns
+    -------
+    theta, phi : np.ndarray
+        Escape angles. NaN where the ray did not escape.
     """
     esc = np.asarray(out["status"]) == 0
     if "phi" in out:
@@ -175,10 +269,25 @@ def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.nd
 def compose_rgb(
     status: np.ndarray, theta: np.ndarray, phi: np.ndarray, spec: VisualSpec
 ) -> np.ndarray:
-    """Compose the (n, n, 3) float RGB image in [0, 1] for `spec`.
+    """Compose the RGB image.
 
-    Captured pixels are black; failed pixels (status 3) are red. Disk pixels are opaque white for
-    greyscale, black for black_hole, else `alpha*white + (1-alpha)*DISK_BACKDROP`.
+    Order of layers: sky, glow, grid, then captured, disk and failed pixels. Captured pixels are
+    black. Failed pixels (status 3) are red. Disk pixels are white for "greyscale", black for
+    "black_hole", else `disk_alpha * white + (1 - disk_alpha) * DISK_BACKDROP`.
+
+    Parameters
+    ----------
+    status : np.ndarray
+        Status of each pixel: 0 escaped, 1 captured, 2 disk, 3 failed.
+    theta, phi : np.ndarray
+        Escape angles from `sky_directions`.
+    spec : VisualSpec
+        Visual options.
+
+    Returns
+    -------
+    np.ndarray
+        Float RGB image of shape (n, n, 3) in [0, 1].
     """
     status = np.asarray(status)
     escaped, disk, failed = status == 0, status == 2, status == 3
@@ -212,7 +321,17 @@ def compose_rgb(
 def render_image(
     out: dict[str, np.ndarray], cfg: ShadowConfig, path: str | Path | None = None
 ) -> None:
-    """Render a run's arrays with `cfg`'s visual options; save to `path`, show if `cfg.show`."""
+    """Render the run arrays with the visual options of the config.
+
+    Parameters
+    ----------
+    out : dict of str to np.ndarray
+        Run arrays.
+    cfg : ShadowConfig
+        Run config.
+    path : str or Path, optional
+        Save the figure to this path. The figure shows on screen if `cfg.show` is set.
+    """
     import matplotlib.pyplot as plt
 
     spec = VisualSpec.from_config(cfg)
@@ -223,7 +342,7 @@ def render_image(
     fig = plt.figure(figsize=(10, 10))
     plt.imshow(rgb, origin="lower", extent=(-h, h, -h, h))
     if cfg.shadow_edge:
-        from shadow_edge import draw_edge
+        from bh_shadows.core.shadow_edge import draw_edge
 
         draw_edge(plt.gca(), cfg)
         plt.xlim(-h, h)

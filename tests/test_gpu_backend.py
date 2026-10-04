@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import gpu_backend as gb
-import run_shadow as rs
-import shadow_config as sc
+from bh_shadows.gpu import backend as gb
+from bh_shadows.runner import run_shadow as rs
+from bh_shadows.runner import shadow_config as sc
 
 
 @pytest.fixture(autouse=True)
@@ -52,8 +52,8 @@ def _gpu_or_skip():
 
 def test_kerr_geo_rhs_matches_cpu():
     _gpu_or_skip()
-    import kerr_core as kc
-    import kerr_gpu as kg
+    from bh_shadows.core import kerr_core as kc
+    from bh_shadows.gpu import kerr_gpu as kg
 
     r0, th0, a, M, al, be = 15.0, np.pi / 2, 0.9, 1.0, 0.1, 0.2
     states = np.array(
@@ -100,8 +100,8 @@ def test_kerr_gpu_agrees_with_cpu():
 # ---------------------------------------------------------------------------
 # Weyl GPU tracer
 # ---------------------------------------------------------------------------
-import generate_matriz as gm  # noqa: E402
-import weyl_core as wc  # noqa: E402
+from bh_shadows.core import matrix as gm  # noqa: E402
+from bh_shadows.core import weyl_core as wc  # noqa: E402
 
 WEYL_N_GRID = 20
 WEYL_CASES = [
@@ -167,7 +167,7 @@ WEYL_POINTS = np.array(
 @pytest.mark.parametrize("MD", WEYL_CASES)
 def test_weyl_probe_matches_cpu(MD, tmp_path, monkeypatch):
     _gpu_or_skip()
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     M, b, lam = _weyl_setup(tmp_path, monkeypatch, MD)
     _frozen_or_skip(lam)
@@ -195,7 +195,7 @@ WEYL_POINTS_NEAR_PLANE = np.array([[7.5, 5e-4], [12.0, -2e-4], [4.0, 3e-4], [20.
 
 def test_weyl_probe_near_disk_plane(tmp_path, monkeypatch):
     _gpu_or_skip()
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     MD = 0.1
     M, b, lam = _weyl_setup(tmp_path, monkeypatch, MD)
@@ -209,7 +209,7 @@ def test_weyl_probe_near_disk_plane(tmp_path, monkeypatch):
 @pytest.mark.parametrize("MD", WEYL_CASES)
 def test_weyl_geo_rhs_matches_cpu(MD, tmp_path, monkeypatch):
     _gpu_or_skip()
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     M, b, lam = _weyl_setup(tmp_path, monkeypatch, MD)
     _frozen_or_skip(lam)
@@ -225,20 +225,20 @@ def test_weyl_geo_rhs_matches_cpu(MD, tmp_path, monkeypatch):
 @pytest.mark.parametrize("MD", WEYL_CASES)
 def test_weyl_gpu_smoke(MD, tmp_path, monkeypatch):
     _gpu_or_skip()
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     M, b, lam = _weyl_setup(tmp_path, monkeypatch, MD)
     rho0 = wc.solve_observer_rho(M, MD, b, z0=0.0, target_gpp_sqrt=15.0)
     h = np.deg2rad(20.0)
-    alfa, beta = np.linspace(-h, 0, 8), np.linspace(h, 0, 8)
-    Mat, Mz, st = wg.f_paral_gpu(rho0, 0.0, M, MD, b, alfa, beta, MD > 0, lam)
+    alpha, beta = np.linspace(-h, 0, 8), np.linspace(h, 0, 8)
+    Mat, Mz, st = wg.f_paral_gpu(rho0, 0.0, M, MD, b, alpha, beta, MD > 0, lam)
     assert Mat.shape == Mz.shape == st.shape == (8, 8)
     assert set(np.unique(st)) <= {0, 3}
     assert np.isfinite(Mat[st == 0]).all() and np.isfinite(Mz[st == 0]).all()
 
 
 def test_weyl_rejects_placeholder_matrix():
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     with pytest.raises(ValueError, match="not loaded"):
         wg.f_paral_gpu(10.0, 0.0, 1.0, 0.0, 6.0, [0.0], [0.0], False, np.zeros((4, 4)))
@@ -261,7 +261,7 @@ def test_weyl_device_recorded(tmp_path, monkeypatch, caplog):
 
 def test_weyl_gpu_fallback_retraces_status3(tmp_path, monkeypatch):
     """Status-3 pixels from the (stubbed) GPU kernel are re-traced on the CPU and counted."""
-    import weyl_gpu as wg
+    from bh_shadows.gpu import weyl_gpu as wg
 
     _seed_matrix(tmp_path, monkeypatch, 1.0, 0.0, 6.0)
     base = {"n": 16, "n_grid": WEYL_N_GRID}
@@ -273,11 +273,11 @@ def test_weyl_gpu_fallback_retraces_status3(tmp_path, monkeypatch):
     )
     flagged = [(0, 1), (2, 3), (7, 7), (4, 0)]
 
-    def stub(rho0, z0, M, MD, b, alfa, beta, disk_visible, lam):
-        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alfa, beta, rs.HDER, disk_visible)
+    def stub(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
+        Mat, Mz = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, rs.HDER, disk_visible)
         st = np.zeros(Mat.shape, dtype=np.int64)
         for i, j in flagged:
-            if i < len(alfa):
+            if i < len(alpha):
                 Mat[i, j], Mz[i, j], st[i, j] = -123.0, 456.0, 3
         return Mat, Mz, st
 
