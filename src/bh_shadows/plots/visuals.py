@@ -4,8 +4,9 @@ Post-process only: it reads the arrays the tracers already return (no extra trac
 except `render_image` and `load_sky_image` (matplotlib). `status` is 0 escaped, 1 captured,
 2 disk, 3 failed. Escape angles `theta` in [0, pi], `phi` in [0, 2*pi) come from `sky_directions`:
 Kerr uses `coord2` and `phi`; Weyl uses theta = pi - atan2(rho, z) (rows are z-mirrored) and the
-traced `phi`. A legacy Weyl npz without `phi` falls back to a flat-sky phi from the pixel column
-(beta).
+traced `phi`. With an off-plane observer (`off_plane`) the rows are not mirrored, but the stored z
+is the true z, so the same formula holds. A legacy Weyl npz without `phi` falls back to a flat-sky
+phi from the pixel column (beta).
 Disk pixels have no direction behind the disk, so they blend
 `disk_alpha * white` over the fixed neutral `DISK_BACKDROP`.
 
@@ -76,6 +77,7 @@ class VisualSpec:
     theta_obs: float = np.pi / 2  # observer polar angle (rad)
     grid_mode: str = "theta"
     distance: float = 15.0
+    z_obs: float = 0.0  # observer z (non-zero for an off-plane Weyl observer)
 
     @classmethod
     def from_config(cls, cfg) -> VisualSpec:
@@ -91,6 +93,8 @@ class VisualSpec:
         VisualSpec
             Visual options.
         """
+        from bh_shadows.runner.shadow_config import OBSERVER_Z_OFFSET
+
         sky = load_sky_image(cfg.image_path) if cfg.background == "image" else None
         return cls(
             background=cfg.background,
@@ -99,6 +103,7 @@ class VisualSpec:
             width_deg=cfg.grid_width_deg,
             grid_mode=cfg.grid_mode,
             distance=cfg.distance,
+            z_obs=OBSERVER_Z_OFFSET if cfg.off_plane else 0.0,
             disk_alpha=cfg.disk_alpha,
             sky=sky,
             light_source=cfg.light_source,
@@ -251,11 +256,12 @@ def grid_mask_end_z(z_end: np.ndarray, phi: np.ndarray, step_deg: float) -> np.n
 
 
 def flat_end_angles(
-    rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float
+    rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float, z_obs: float = 0.0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the flat-space pixel angles that would reach each ray end point.
 
-    The end point `(rho, phi, -z)` is joined to the observer at `x = distance` by a straight line.
+    The end point `(rho, phi, -z)` is joined to the observer at `x = distance`, `z = z_obs` by a
+    straight line.
     The angles of that line (sign convention of the traced runs) are `alpha_e`, `beta_e`. Without
     a black hole they equal the pixel angles, so lines of constant `alpha_e` or `beta_e` are
     straight; the black hole bends them.
@@ -266,6 +272,8 @@ def flat_end_angles(
         End rho, end z and end phi of each ray (`coord1`, `coord2`, `phi`).
     distance : float
         Observer distance.
+    z_obs : float, optional
+        Observer z (non-zero for an off-plane observer).
 
     Returns
     -------
@@ -275,14 +283,19 @@ def flat_end_angles(
     rho_end = np.asarray(rho_end, dtype=float)
     dx = rho_end * np.cos(phi) - distance
     dy = rho_end * np.sin(phi)
-    dz = -np.asarray(z_end, dtype=float)
+    dz = z_obs - np.asarray(z_end, dtype=float)
     norm = np.sqrt(dx**2 + dy**2 + dz**2)
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.arcsin(dz / norm), np.arctan2(-dy, -dx)
 
 
 def grid_mask_flat_angle(
-    rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float, step_deg: float
+    rho_end: np.ndarray,
+    z_end: np.ndarray,
+    phi: np.ndarray,
+    distance: float,
+    step_deg: float,
+    z_obs: float = 0.0,
 ) -> np.ndarray:
     """Return the mask of the lensed flat-angle grid lines.
 
@@ -297,6 +310,8 @@ def grid_mask_flat_angle(
         Observer distance.
     step_deg : float
         Line spacing in degrees.
+    z_obs : float, optional
+        Observer z (see `flat_end_angles`).
 
     Returns
     -------
@@ -304,7 +319,7 @@ def grid_mask_flat_angle(
         True on a grid line. NaN inputs give False.
     """
     step = np.deg2rad(step_deg)
-    ae, be = flat_end_angles(rho_end, z_end, phi, distance)
+    ae, be = flat_end_angles(rho_end, z_end, phi, distance, z_obs)
     with np.errstate(invalid="ignore"):
         on = lambda x: np.abs(x - np.round(x / step) * step) <= FLAT_ANGLE_HALF_WIDTH  # noqa: E731
         return on(ae) | on(be)
@@ -429,7 +444,9 @@ def compose_rgb(
         if spec.grid_mode == "flat_angle":
             if z_end is None or rho_end is None:
                 raise ValueError("grid_mode 'flat_angle' needs rho_end and z_end")
-            mask = grid_mask_flat_angle(rho_end, z_end, phi, spec.distance, spec.step_deg)
+            mask = grid_mask_flat_angle(
+                rho_end, z_end, phi, spec.distance, spec.step_deg, spec.z_obs
+            )
         elif spec.grid_mode == "end_z":
             if z_end is None:
                 raise ValueError("grid_mode 'end_z' needs z_end")

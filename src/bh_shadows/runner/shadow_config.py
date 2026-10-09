@@ -16,6 +16,7 @@ BACKGROUNDS = ("palette", "black_hole", "two_color", "greyscale", "four_color", 
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
 RUNS_DIR = Path("runs")
 _STAMP_RE = re.compile(r"\d{8}_\d{6}")
+OBSERVER_Z_OFFSET = 0.07  # Weyl units; observer height when `off_plane` is on (tune by eye)
 
 
 def _now_stamp() -> str:
@@ -42,6 +43,7 @@ class ShadowConfig:
     # observer
     distance: float = 15.0
     theta0: float = 90.0
+    off_plane: bool = False
     # grid
     n: int = 160
     half_angle: float = HALF_ANGLE_DEFAULT
@@ -100,6 +102,11 @@ class ShadowConfig:
             raise ValueError(
                 "a != 0 with MD > 0 is not supported: the Weyl superposition only holds for "
                 "static spacetimes (Kerr + disk is a separate plan)"
+            )
+        if self.off_plane and not (self.backend == "weyl" and self.MD > 0):
+            raise ValueError(
+                "off_plane needs the Weyl backend with a disk (MD > 0); got "
+                f"backend={self.backend!r}, MD={self.MD}"
             )
         if self.backend_opt not in ("auto", "weyl", "kerr"):
             raise ValueError(f"backend must be auto|weyl|kerr, got {self.backend_opt!r}")
@@ -203,6 +210,7 @@ class ShadowConfig:
             "b": self.b,
             "distance": self.distance,
             "theta0": self.theta0,
+            "off_plane": self.off_plane,
             "n": self.n,
             "half_angle": self.half_angle,
             "disk_visible": self.disk_visible,
@@ -246,7 +254,7 @@ class ShadowConfig:
         for key in ("M", "a", "MD", "b"):
             if key in raw.get("spacetime", {}):
                 flat[key] = raw["spacetime"][key]
-        for key in ("distance", "theta0"):
+        for key in ("distance", "theta0", "off_plane"):
             if key in raw.get("observer", {}):
                 flat[key] = raw["observer"][key]
         for key in ("n", "half_angle"):
@@ -303,7 +311,8 @@ class ShadowConfig:
         return (
             f'name = "{self.run_name}"\n\n'
             f"[spacetime]\nM = {d['M']}\na = {d['a']}\nMD = {d['MD']}\nb = {d['b']}\n\n"
-            f"[observer]\ndistance = {d['distance']}\ntheta0 = {d['theta0']}\n\n"
+            f"[observer]\ndistance = {d['distance']}\ntheta0 = {d['theta0']}\n"
+            f"off_plane = {str(d['off_plane']).lower()}\n\n"
             f"[grid]\nn = {d['n']}\nhalf_angle = {d['half_angle']}\n\n"
             f"[tracer]\ndisk_visible = {disk_s}\nparallel = {str(d['parallel']).lower()}\n"
             f'backend = "{d["backend_opt"]}"\ndevice = "{d["device_opt"]}"\n\n'

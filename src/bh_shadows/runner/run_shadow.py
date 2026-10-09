@@ -25,7 +25,7 @@ from bh_shadows.core.matrix import ensure_matrix, matrix_path
 from bh_shadows.gpu.backend import resolve_device
 from bh_shadows.plots import visuals
 from bh_shadows.plots.weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
-from bh_shadows.runner.shadow_config import ShadowConfig
+from bh_shadows.runner.shadow_config import OBSERVER_Z_OFFSET, ShadowConfig
 
 log = logging.getLogger(__name__)
 
@@ -175,13 +175,39 @@ def _mirror4(
     return full
 
 
+def _mirror_beta(q: np.ndarray, phi_flip_right: bool = False, phi0: float = 0.0) -> np.ndarray:
+    """Mirror the left half of the image into the right half (columns only).
+
+    Parameters
+    ----------
+    q : np.ndarray
+        Left-half array of shape (n_rows, n_cols).
+    phi_flip_right : bool, optional
+        Reflect phi about `phi0` on the right half (use it for phi).
+    phi0 : float, optional
+        Observer phi.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_rows, 2 * n_cols).
+    """
+    full = np.concatenate([q, q[:, ::-1]], axis=1)
+    if phi_flip_right:
+        full[:, q.shape[1] :] = phi0 - (full[:, q.shape[1] :] - phi0)
+    return full
+
+
 def _trace_weyl(
     cfg: ShadowConfig, progress: bool = True, chunk: int | None = None
 ) -> dict[str, np.ndarray]:
     """Trace a Weyl (static) run.
 
     The spacetime is symmetric about the equator and about the image centre. The function traces one
-    quadrant and mirrors it. On the GPU, it traces the status-3 pixels again on the CPU.
+    quadrant and mirrors it. With `cfg.off_plane` the observer is at `z = OBSERVER_Z_OFFSET`, the
+    equator symmetry is lost, and the function traces all alpha rows and half of the beta columns
+    (twice the rays) and mirrors the columns only. On the GPU, it traces the status-3 pixels again
+    on the CPU.
 
     Parameters
     ----------
@@ -207,12 +233,14 @@ def _trace_weyl(
     mpath = ensure_matrix(cfg.M, cfg.MD, cfg.b, cfg.n_grid, cfg.matrix_source)
     wc.load_matrix(str(mpath))  # must precede the first trace
     RUN_STATS["matrix_s"] = round(time.perf_counter() - t_mat, 3)
-    z0 = 0.0
+    z0 = OBSERVER_Z_OFFSET if cfg.off_plane else 0.0
     rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=z0, target_gpp_sqrt=cfg.distance)
 
     alpha_full, beta_full = _angles(cfg)
     half = cfg.n // 2
-    alpha, beta = alpha_full[:half], beta_full[:half]
+    alpha = alpha_full if cfg.off_plane else alpha_full[:half]
+    beta = beta_full[:half]
+    n_rows = len(alpha)
     device = _resolve_run_device(cfg)
     RUN_STATS["device"] = device
     if cfg.parallel:
@@ -234,7 +262,7 @@ def _trace_weyl(
 
         Mat, Mz, Mphi, *gpu_st = _chunked_rows(
             tracer,
-            half,
+            n_rows,
             progress=progress,
             desc="weyl-gpu" if device == "gpu" else "weyl",
             chunk=chunk if device == "cpu" else (chunk or GPU_CHUNK_ROWS),
@@ -252,8 +280,8 @@ def _trace_weyl(
             RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
     else:
-        Mat, Mz, Mphi = (np.zeros((half, half)) for _ in range(3))
-        for i in tqdm(range(half), unit="row", desc="weyl", disable=not progress):
+        Mat, Mz, Mphi = (np.zeros((n_rows, half)) for _ in range(3))
+        for i in tqdm(range(n_rows), unit="row", desc="weyl", disable=not progress):
             for j in range(half):
                 y = np.array(
                     [
@@ -281,6 +309,13 @@ def _trace_weyl(
 
     status = classify_shadow_disk(Mat, Mz, cfg.b)
     status[np.isnan(Mat) | np.isnan(Mz)] = 3
+    if cfg.off_plane:
+        return {
+            "status": _mirror_beta(status).astype(int),
+            "coord1": _mirror_beta(Mat),
+            "coord2": _mirror_beta(Mz),
+            "phi": _mirror_beta(Mphi, phi_flip_right=True),
+        }
     return {
         "status": _mirror4(status).astype(int),
         "coord1": _mirror4(Mat),

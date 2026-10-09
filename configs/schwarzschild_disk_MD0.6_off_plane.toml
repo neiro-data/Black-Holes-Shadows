@@ -1,0 +1,29 @@
+# Example: Schwarzschild black hole inside a heavy Morgan-Morgan disk, observer slightly above the
+# disk plane (off_plane = true; Weyl with a disk only). Traces twice the rays of a plane observer.
+# Run:     uv run python run_shadow.py configs/schwarzschild_disk_MD0.6_off_plane.toml --n 64
+name = "schwarzschild_disk_MD0.6_b3_off_plane"
+
+[spacetime]
+M  = 0.4
+a  = 0.0
+MD = 0.6
+b  = 3.0
+
+[observer]
+distance = 15.0
+off_plane = true
+
+[grid]
+n = 160
+
+[tracer]
+disk_visible = false
+
+[matrix]
+n_grid = 1200
+source = "auto"
+
+[plot]
+palette = "grey_black_white"
+background = "four_color"
+grid = false

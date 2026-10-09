@@ -221,3 +221,42 @@ def test_weyl_phi_matches_kerr_a0():
     diff = np.abs(weyl["phi"][both] - kerr["phi"][both])
     assert np.median(diff) < 1e-2
     assert np.mean(diff < 2e-2) > 0.8
+
+
+def _off_plane_cfg(n=16, **extra):
+    ov = {"n": n, "n_grid": 20, "show": False, "parallel": False, "M": 0.9, "MD": 0.1} | extra
+    return sc.ShadowConfig.from_toml("configs/schwarzschild_disk.toml", ov)
+
+
+def test_off_plane_at_zero_offset_matches_quadrant_path(monkeypatch):
+    """Full-alpha trace at z0 = 0 reproduces the mirrored quadrant (settles the z sign, D4)."""
+    ref = rs.trace_grid(_off_plane_cfg(), progress=False)
+    monkeypatch.setattr(rs, "OBSERVER_Z_OFFSET", 0.0)
+    got = rs.trace_grid(_off_plane_cfg(off_plane=True), progress=False)
+    assert np.array_equal(ref["status"], got["status"])
+    # only escaped pixels carry a sky direction (disk hits store z + 50; the old mirror flips it)
+    keep = ref["status"] == 0
+    for k in ("coord1", "coord2", "phi"):
+        np.testing.assert_allclose(got[k][keep], ref[k][keep], atol=1e-8, equal_nan=True)
+
+
+def test_off_plane_symmetry_and_asymmetry():
+    cfg = _off_plane_cfg(off_plane=True)
+    out = rs.trace_grid(cfg, progress=False)
+    n = cfg.n
+    assert out["status"].shape == (n, n)
+    esc = out["status"] == 0
+    assert esc.any() and np.isfinite(out["phi"][esc]).all()
+    # column mirror: rho, z equal; phi antisymmetric about 0
+    np.testing.assert_allclose(out["coord1"][:, ::-1], out["coord1"], equal_nan=True)
+    np.testing.assert_allclose(out["coord2"][:, ::-1], out["coord2"], equal_nan=True)
+    np.testing.assert_allclose(out["phi"][:, ::-1][esc], -out["phi"][esc], atol=1e-8)
+    # the alpha mirror is lost: the observer sees more disk below than above
+    assert not np.array_equal(esc, esc[::-1])
+    # disk hits are not symmetric about the middle row
+    disk = out["status"] == 2
+    assert disk.any() and not np.array_equal(disk, disk[::-1])
+
+
+def test_off_plane_default_is_off():
+    assert sc.ShadowConfig().off_plane is False

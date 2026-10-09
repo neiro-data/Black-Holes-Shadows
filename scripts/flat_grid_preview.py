@@ -37,14 +37,15 @@ def flat_run(cfg: sc.ShadowConfig, z_sign: float = -1.0) -> dict[str, np.ndarray
     alpha, beta = rs._angles(cfg)
     a, b = np.meshgrid(alpha, beta, indexing="ij")
     d = cfg.distance
+    z0 = sc.OBSERVER_Z_OFFSET if cfg.off_plane else 0.0
     ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
     # |p0 + t u| = R: t^2 + 2 d ux t + d^2 - R^2 = 0, positive root
     t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R_ESC**2)
-    x, y, z = d + t * ux, t * uy, t * uz
+    x, y, z = d + t * ux, t * uy, z_sign * t * uz
     return {
         "status": np.zeros(a.shape, int),
         "coord1": np.hypot(x, y),
-        "coord2": z_sign * z,
+        "coord2": z0 + z,
         "phi": np.arctan2(y, x),
     }
 

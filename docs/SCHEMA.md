@@ -35,6 +35,16 @@ parameters. `ensure_matrix` refuses a file whose sidecar does not match the requ
 `load_matrix` sets a module-level matrix inside `weyl_core`. Call it before the first trace, or
 the tracer runs against no matrix.
 
+## Config key — [observer] off_plane
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `off_plane` | bool | `false` | Put the Weyl observer at `z = OBSERVER_Z_OFFSET` (a small constant in `shadow_config.py`) instead of `z = 0`. |
+
+Only the Weyl backend with a disk (`MD > 0`) accepts `true`. Other runs raise `ValueError`. The
+vertical (alpha) mirror symmetry is lost, so the runner traces all alpha rows and half of the beta
+columns, then mirrors the columns. This doubles the ray count. With `false` the output does not change.
+
 ## Config keys — [plot]
 
 All keys are optional. Visuals are a post-process of the saved arrays; they do not change tracing.

@@ -202,3 +202,18 @@ def test_grid_mode_end_z_roundtrip_and_weyl_only(tmp_path):
     assert cfg.to_metadata()["grid_mode"] == "end_z"
     with pytest.raises(ValueError, match="Weyl-only"):
         ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov | {"a": 0.5})
+
+
+@pytest.mark.parametrize("ov", [{"a": 0.5}, {"M": 1.0, "MD": 0.0}, {"backend_opt": "kerr"}])
+def test_off_plane_rejected_without_weyl_disk(tmp_path, ov):
+    with pytest.raises(ValueError, match="off_plane"):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"off_plane": True} | ov)
+
+
+def test_off_plane_accepted_and_roundtrips(tmp_path):
+    p = write_cfg(tmp_path, "[spacetime]\nM = 0.9\nMD = 0.1\n[observer]\noff_plane = true\n")
+    cfg = ShadowConfig.from_toml(p)
+    assert cfg.off_plane and "off_plane = true" in cfg.to_toml()
+    q = write_cfg(tmp_path, cfg.to_toml())
+    assert ShadowConfig.from_toml(q).off_plane
+    assert cfg.to_metadata()["off_plane"] is True

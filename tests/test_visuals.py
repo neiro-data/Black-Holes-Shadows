@@ -247,6 +247,19 @@ def test_flat_end_angles_recover_pixel_angles():
     assert not v.grid_mask_flat_angle(*(np.array([np.nan]),) * 3, d, step).any()
 
 
+def test_flat_end_angles_off_plane_observer():
+    d, R, z0 = 15.0, 30.0, 0.07
+    a, b = np.meshgrid(np.linspace(-0.5, 0.5, 9), np.linspace(-0.5, 0.5, 9), indexing="ij")
+    ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
+    t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R**2)
+    x, y, z = d + t * ux, t * uy, z0 - t * uz  # stored z: observer height, alpha sign flipped
+    ae, be = v.flat_end_angles(np.hypot(x, y), z, np.arctan2(y, x), d, z0)
+    np.testing.assert_allclose(ae, a, atol=1e-12)
+    np.testing.assert_allclose(be, b, atol=1e-12)
+    ae0, _ = v.flat_end_angles(np.hypot(x, y), z, np.arctan2(y, x), d)
+    assert not np.allclose(ae0, a, atol=1e-6)
+
+
 def test_compose_rgb_end_z_needs_z_end():
     st = np.zeros((2, 2), int)
     ang = np.full((2, 2), 1.0)
