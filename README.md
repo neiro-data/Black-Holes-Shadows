@@ -105,7 +105,7 @@ The config selects the spacetime through `[spacetime]` (`M`, `a`, `MD`, `b`). `M
 
 `[observer] off_plane = true` (default `false`) moves the Weyl observer slightly above the disk plane
 (`z = OBSERVER_Z_OFFSET` in `shadow_config.py`) so the disk is not seen edge-on. It needs the Weyl
-backend with a disk (`MD > 0`); Kerr and Weyl without a disk raise `ValueError`. The equator symmetry
+backend (with or without a disk); Kerr raises `ValueError`. The equator symmetry
 is lost, so the run traces twice as many rays. Example: `configs/schwarzschild_disk_MD0.6_off_plane.toml`.
 
 ## Plotting

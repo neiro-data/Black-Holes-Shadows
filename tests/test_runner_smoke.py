@@ -260,3 +260,14 @@ def test_off_plane_symmetry_and_asymmetry():
 
 def test_off_plane_default_is_off():
     assert sc.ShadowConfig().off_plane is False
+
+
+def test_off_plane_without_disk_runs():
+    cfg = sc.ShadowConfig.from_toml(
+        "configs/schwarzschild_nodisk.toml",
+        {"n": 16, "n_grid": 20, "show": False, "parallel": False, "off_plane": True},
+    )
+    out = rs.trace_grid(cfg, progress=False)
+    esc = out["status"] == 0
+    assert out["status"].shape == (16, 16) and esc.any() and np.isfinite(out["phi"][esc]).all()
+    assert (out["status"] == 1).any()

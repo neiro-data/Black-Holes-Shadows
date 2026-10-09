@@ -41,7 +41,7 @@ the tracer runs against no matrix.
 | --- | --- | --- | --- |
 | `off_plane` | bool | `false` | Put the Weyl observer at `z = OBSERVER_Z_OFFSET` (a small constant in `shadow_config.py`) instead of `z = 0`. |
 
-Only the Weyl backend with a disk (`MD > 0`) accepts `true`. Other runs raise `ValueError`. The
+Only the Weyl backend (with or without a disk) accepts `true`. Kerr raises `ValueError`. The
 vertical (alpha) mirror symmetry is lost, so the runner traces all alpha rows and half of the beta
 columns, then mirrors the columns. This doubles the ray count. With `false` the output does not change.
 

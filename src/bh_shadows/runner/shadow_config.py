@@ -103,11 +103,8 @@ class ShadowConfig:
                 "a != 0 with MD > 0 is not supported: the Weyl superposition only holds for "
                 "static spacetimes (Kerr + disk is a separate plan)"
             )
-        if self.off_plane and not (self.backend == "weyl" and self.MD > 0):
-            raise ValueError(
-                "off_plane needs the Weyl backend with a disk (MD > 0); got "
-                f"backend={self.backend!r}, MD={self.MD}"
-            )
+        if self.off_plane and self.backend != "weyl":
+            raise ValueError(f"off_plane needs the Weyl backend, got backend={self.backend!r}")
         if self.backend_opt not in ("auto", "weyl", "kerr"):
             raise ValueError(f"backend must be auto|weyl|kerr, got {self.backend_opt!r}")
         if self.device_opt not in ("auto", "cpu", "gpu"):

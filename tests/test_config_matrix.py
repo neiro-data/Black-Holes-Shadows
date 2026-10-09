@@ -204,10 +204,15 @@ def test_grid_mode_end_z_roundtrip_and_weyl_only(tmp_path):
         ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov | {"a": 0.5})
 
 
-@pytest.mark.parametrize("ov", [{"a": 0.5}, {"M": 1.0, "MD": 0.0}, {"backend_opt": "kerr"}])
-def test_off_plane_rejected_without_weyl_disk(tmp_path, ov):
+@pytest.mark.parametrize("ov", [{"a": 0.5}, {"M": 1.0, "MD": 0.0, "backend_opt": "kerr"}])
+def test_off_plane_rejected_for_kerr(tmp_path, ov):
     with pytest.raises(ValueError, match="off_plane"):
         ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"off_plane": True} | ov)
+
+
+def test_off_plane_accepted_without_disk(tmp_path):
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"off_plane": True})
+    assert cfg.backend == "weyl" and cfg.MD == 0 and cfg.off_plane
 
 
 def test_off_plane_accepted_and_roundtrips(tmp_path):
