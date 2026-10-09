@@ -15,6 +15,8 @@ point behind the observer (`theta = pi - theta_obs`, `phi = pi`) is blended over
 so lensed rays form a bright ring around the shadow. Layering: sky, glow, grid, then
 captured/disk/failed.
 
+Colours are pure red, green, yellow and blue.
+
 Quadrants, as the observer sees them (flat-sky limit): upper-left red, upper-right green,
 lower-left yellow, lower-right blue. "Upper" is theta < pi/2; left/right is the sign of
 `phi_rel = wrap(phi - pi)` times `PHI_LEFT_SIGN`.
@@ -37,10 +39,10 @@ log = logging.getLogger(__name__)
 # Sign of phi_rel that means "left" in the image (fixed empirically against real runs).
 PHI_LEFT_SIGN = 1
 
-RED = np.array([0.91, 0.21, 0.16])
-GREEN = np.array([0.47, 0.98, 0.33])
-YELLOW = np.array([1.0, 1.0, 0.31])
-BLUE = np.array([0.0, 0.0, 0.96])
+RED = np.array([1.0, 0.0, 0.0])
+GREEN = np.array([0.0, 1.0, 0.0])
+YELLOW = np.array([1.0, 1.0, 0.0])
+BLUE = np.array([0.0, 0.0, 1.0])
 GREY = np.array([0.505, 0.505, 0.505])
 BLACK = np.zeros(3)
 WHITE = np.ones(3)
