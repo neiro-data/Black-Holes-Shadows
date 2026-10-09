@@ -103,6 +103,11 @@ The config selects the spacetime through `[spacetime]` (`M`, `a`, `MD`, `b`). `M
 | Black hole and disk | `MD > 0.0`, `a = 0` | Weyl (quadrature lambda table, built once and cached). |
 | Kerr | `a > 0`, `MD = 0` | Kerr (no table). |
 
+`[observer] off_plane = true` (default `false`) moves the Weyl observer slightly above the disk plane
+(`z = OBSERVER_Z_OFFSET` in `shadow_config.py`) so the disk is not seen edge-on. It needs the Weyl
+backend (with or without a disk); Kerr raises `ValueError`. The equator symmetry
+is lost, so the run traces twice as many rays. Example: `configs/schwarzschild_disk_MD0.6_off_plane.toml`.
+
 ## Plotting
 
 The `palette` background picks a palette by name, with `weyl_plot.get_colormap(...)`. Five
