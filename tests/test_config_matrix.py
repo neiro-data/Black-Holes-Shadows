@@ -107,7 +107,12 @@ def test_plot_defaults_equal_legacy(tmp_path):
         {"grid_width_deg": 0.0},
         {"grid_step_deg": 10.0, "grid_width_deg": 5.0},
         {"grid_mode": "nope"},
-        {"grid": True, "background": "four_color", "grid_mode": "end_z", "backend_opt": "kerr"},
+        {
+            "grid": True,
+            "background": "four_color",
+            "grid_mode": "flat_angle",
+            "backend_opt": "kerr",
+        },
     ],
 )
 def test_plot_validation_errors(tmp_path, ov):
@@ -192,14 +197,25 @@ def test_plot_to_toml_round_trip(tmp_path):
     assert back.image_path == str(png.resolve())
 
 
-def test_grid_mode_end_z_roundtrip_and_weyl_only(tmp_path):
-    ov = {"grid": True, "background": "four_color", "grid_mode": "end_z"}
+def test_palette_written_only_for_palette_background(tmp_path):
+    pal = ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"palette": "quadrant"})
+    assert 'palette = "quadrant"' in pal.to_toml()
+    assert pal.to_metadata()["palette"] == "quadrant"
+    four = dataclasses.replace(pal, background="four_color")
+    assert "palette" not in four.to_toml()
+    assert four.to_metadata()["palette"] is None
+    back = ShadowConfig.from_toml(write_cfg(tmp_path, four.to_toml()))
+    assert back.background == "four_color"
+
+
+def test_grid_mode_flat_angle_roundtrip_and_weyl_only(tmp_path):
+    ov = {"grid": True, "background": "four_color", "grid_mode": "flat_angle"}
     cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov)
-    assert cfg.backend == "weyl" and cfg.grid_mode == "end_z"
+    assert cfg.backend == "weyl" and cfg.grid_mode == "flat_angle"
     again = tmp_path / "again.toml"
     again.write_text(cfg.to_toml())
-    assert ShadowConfig.from_toml(again).grid_mode == "end_z"
-    assert cfg.to_metadata()["grid_mode"] == "end_z"
+    assert ShadowConfig.from_toml(again).grid_mode == "flat_angle"
+    assert cfg.to_metadata()["grid_mode"] == "flat_angle"
     with pytest.raises(ValueError, match="Weyl-only"):
         ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov | {"a": 0.5})
 

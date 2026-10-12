@@ -1,0 +1,24 @@
+# Example: Kerr black hole, spin a = 0.9, no disk, equatorial observer (theta0 = 90 deg).
+# Run:     uv run bh-shadow configs/kerr_a0.9_nodisk_image.toml --n 64
+# GPU:     add `--device gpu` (Apple Silicon, `uv sync --extra gpu`); or set it here:
+#          [tracer]
+#          device = "gpu"   # auto|cpu|gpu; auto = cpu for now; GPU is float32, Kerr only
+# Output:  runs/<timestamp>_<name>/ (outputs.npz, image.png, run.json)
+name = "kerr_a0.9_nodisk_image"
+
+[spacetime]
+M  = 1.0
+a  = 0.9
+MD = 0.0
+
+[observer]
+distance = 15.0
+theta0   = 90.0
+
+[grid]
+n = 320
+
+[plot]
+background = "image"
+image = "examples/pillarsofcreation_composite.jpg"
+grid = false

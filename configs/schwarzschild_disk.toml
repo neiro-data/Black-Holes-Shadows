@@ -1,9 +1,9 @@
 # Example: Schwarzschild black hole inside a thin Morgan-Morgan disk (MD = disk mass, b = disk
 # radius parameter), Weyl coordinates. Builds the lambda lookup matrix on first run.
-# Run:     uv run python run_shadow.py configs/schwarzschild_disk.toml --n 64
+# Run:     uv run bh-shadow configs/schwarzschild_disk.toml --n 64
 # Device:  CPU (numba) by default; `--device gpu` runs the float32 Metal kernel on Apple Silicon
 #          (needs `uv sync --extra gpu`; falls back to CPU, with a warning, if unavailable).
-# Output:  runs/<timestamp>_<name>/ (status/coord1/coord2 txt, image.png, run.json)
+# Output:  runs/<timestamp>_<name>/ (outputs.npz, image.png, run.json)
 name = "schwarzschild_disk_MD0.1_b6"
 
 [spacetime]

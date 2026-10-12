@@ -1,8 +1,8 @@
 # Example: Schwarzschild black hole (M = 0.4) inside a massive Morgan-Morgan disk (MD = 0.6,
-# b = 3.0), Weyl coordinates, traced phi and the end-z grid.
-# Run:     uv run bh-shadow configs/schwarzschild_disk_MD0.6_end_z_grid.toml --n 2048
+# b = 3.0), Weyl coordinates, traced phi and the flat-angle grid.
+# Run:     uv run bh-shadow configs/schwarzschild_disk_MD0.6_grid.toml --n 2048
 # Matrix:  needs matrices/lambda_M0.4_MD0.6_b3.0_n1200.* (built on first run if missing).
-name = "schwarzschild_disk_MD0.6_end_z_grid"
+name = "schwarzschild_disk_MD0.6_grid"
 
 [spacetime]
 M  = 0.4

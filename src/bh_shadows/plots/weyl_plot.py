@@ -102,8 +102,7 @@ def plot_status(status: np.ndarray, cfg, path=None):
     import matplotlib.pyplot as plt
 
     h = cfg.half_angle
-    cm = get_colormap(cfg.palette).copy()
-    cm.set_bad("red")
+    cm = get_colormap(cfg.palette).with_extremes(bad="red")
     img = np.ma.masked_where(status == STATUS_FAILED, status)
     fig = plt.figure(figsize=(10, 10))
     plt.imshow(
@@ -112,7 +111,7 @@ def plot_status(status: np.ndarray, cfg, path=None):
         vmin=0,
         vmax=len(PALETTES[cfg.palette]) - 1,
         origin="lower",
-        extent=[-h, h, -h, h],
+        extent=(-h, h, -h, h),
     )
     if getattr(cfg, "shadow_edge", False):
         from bh_shadows.core.shadow_edge import draw_edge

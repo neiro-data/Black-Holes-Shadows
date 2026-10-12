@@ -218,20 +218,6 @@ def test_sky_directions_kerr_and_weyl():
     assert np.isclose(ph[0, 0], 7.0 - 2 * np.pi)
 
 
-def test_grid_mask_end_z_hits_lines_and_misses_mid_cells():
-    step = 10.0
-    ks = np.arange(19)
-    on = 30.0 - ks * 60.0 / 18.0
-    mid = on[:-1] - 0.5 * 60.0 / 18.0
-    phi_mid = np.full(len(on), np.deg2rad(35.0))
-    assert v.grid_mask_end_z(on, phi_mid, step).all()
-    assert not v.grid_mask_end_z(mid, phi_mid[:-1], step).any()
-    z_mid = np.full(3, mid[0])
-    phi_on = np.deg2rad([0.0, 30.0, 180.0])
-    assert v.grid_mask_end_z(z_mid, phi_on, step).all()
-    assert not v.grid_mask_end_z(np.array([np.nan]), np.array([np.nan]), step).any()
-
-
 def test_flat_end_angles_recover_pixel_angles():
     d, R = 15.0, 30.0
     a, b = np.meshgrid(np.linspace(-0.5, 0.5, 9), np.linspace(-0.5, 0.5, 9), indexing="ij")
@@ -260,15 +246,14 @@ def test_flat_end_angles_off_plane_observer():
     assert not np.allclose(ae0, a, atol=1e-6)
 
 
-def test_compose_rgb_end_z_needs_z_end():
+def test_compose_rgb_flat_angle_needs_rho_end_and_z_end():
     st = np.zeros((2, 2), int)
     ang = np.full((2, 2), 1.0)
-    sp = spec(background="four_color", grid=True, grid_mode="end_z")
-    with pytest.raises(ValueError, match="z_end"):
-        v.compose_rgb(st, ang, ang, sp)
-    z = np.full((2, 2), 30.0)
-    rgb = v.compose_rgb(st, ang, ang, sp, z_end=z)
-    assert (rgb == v.GRID_COLOR).all()
+    sp = spec(background="four_color", grid=True, grid_mode="flat_angle")
+    with pytest.raises(ValueError, match="rho_end and z_end"):
+        v.compose_rgb(st, ang, ang, sp, z_end=np.zeros((2, 2)))
+    rgb = v.compose_rgb(st, ang, ang, sp, z_end=np.zeros((2, 2)), rho_end=np.full((2, 2), 30.0))
+    assert (rgb == v.GRID_COLOR).all()  # z_end = 0 lies on the alpha_e = 0 line
 
 
 @pytest.mark.parametrize("bg", ["black_hole", "two_color", "greyscale", "four_color"])

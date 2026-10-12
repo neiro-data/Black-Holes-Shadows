@@ -132,9 +132,8 @@ The float32 type causes these changes:
   Pixels near the shadow edge can change class. Use the CPU for reference results.
 - **Lambda table.** The GPU cannot build the table. The quadrature uses scalar adaptive
   `scipy.quad`, which has no GPU form.
-- **Weyl `phi`.** The Weyl kernel does not trace `phi`, as on the CPU.
 - **Watchdog.** macOS can stop a GPU launch that runs too long. The limit is not documented. Keep
-  each launch below about 1 s (see the chunk rule in the README).
+  each launch below about 1 s (see the chunk rule below).
 - **Compile time.** The first launch in each process compiles the kernel (0.2 to 0.9 s). Later
   launches use the cache.
 - **One config per process.** `weyl_core.Mat_nu` is fixed when numba compiles. Run each config in
@@ -142,4 +141,33 @@ The float32 type causes these changes:
 
 ## Measured results
 
-For speed, chunk size and CPU-GPU agreement, see the README section "GPU backend".
+Benchmark one config (n <= 64; one config per process). `--agree` compares CPU and GPU on the
+same table.
+
+```bash
+uv run python scripts/gpu_bench.py --config configs/schwarzschild_disk.toml --n 64 --n-grid 1200 --device gpu --chunk 32
+```
+
+**Measured (Apple Silicon, 2026-10-04, n = 64, warm = median of 3, matrix cached):**
+
+| Config | CPU warm | GPU warm (chunk 32) | Speedup | Dispatch max (chunk 32) |
+| --- | --- | --- | --- | --- |
+| `schwarzschild_disk` (n_grid 1200) | 1.82 s | 0.079 s | 23x | 0.032 s |
+| `schwarzschild_nodisk` | 1.90 s | 0.063 s | 30x | 0.019 s |
+| `kerr_a0.9_nodisk` | 0.81 s | 0.019 s | 43x | 0.019 s |
+
+Cold start (first trace, includes numba/Metal compile): CPU 4-6 s, GPU 0.2-0.9 s. `matrix_s` is
+0.05 s on a cached table; the quadrature build is separate and scales as `n_grid^2`.
+No float32 fallback pixels in any of these runs. All speedups are above 1.5x, so
+`AUTO_PREFERS_GPU` can be set to `True`.
+
+**Chunk rule** (`T_BUDGET` = 1.0 s per dispatch; an assumption, the macOS watchdog limit is not
+documented). Weyl at n = 64, disk: max dispatch 0.031 / 0.032 / 0.031 / 0.032 s for chunk
+4 / 8 / 16 / 32, so it is launch-bound. Per-thread cost `c = 0.0318 / (32 x 32)` = 3.1e-5 s
+(pessimistic), projected for n = 1024: `t(32) = c x 32 x 512` = 0.51 s <= 1 s. Kerr: real
+n = 4096 run, 0.19 s mean per 16-row dispatch; max/mean ratio at n = 64 is q = 1.04, so
+`t(32) = 2 x 0.19 x 1.04` = 0.40 s <= 1 s. Both backends get 32.
+
+**Weyl CPU vs GPU agreement on the real quadrature table** (n = 64, n_grid = 1200, M = 0.9,
+MD = 0.1): status mismatch 0 of 4096 pixels; median |d coord1| on escaped pixels 5.3e-4,
+|d coord2| 6.3e-5; 1140 disk pixels on both devices, median |d coord1| 6.3e-4; 0 fallback pixels.

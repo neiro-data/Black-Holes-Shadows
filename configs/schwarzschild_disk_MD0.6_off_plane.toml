@@ -24,6 +24,5 @@ n_grid = 1200
 source = "auto"
 
 [plot]
-palette = "grey_black_white"
 background = "four_color"
 grid = true

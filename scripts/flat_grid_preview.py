@@ -1,4 +1,4 @@
-"""Render the end-z grid for straight (unlensed) rays, as in flat Euclidean space.
+"""Render the grid for straight (unlensed) rays, as in flat Euclidean space.
 
 The observer sits at x = d on the x axis, phi = 0. Each pixel ray goes straight (backwards in time,
 towards and past the centre) and ends on the sphere |p| = 30. The y and z signs follow the traced

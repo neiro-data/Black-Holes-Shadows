@@ -1,9 +1,9 @@
 # Example: Kerr black hole, spin a = 0.9, no disk, equatorial observer (theta0 = 90 deg).
-# Run:     uv run python run_shadow.py configs/kerr_a0.9_nodisk.toml --n 64
+# Run:     uv run bh-shadow configs/kerr_a0.9_nodisk.toml --n 64
 # GPU:     add `--device gpu` (Apple Silicon, `uv sync --extra gpu`); or set it here:
 #          [tracer]
 #          device = "gpu"   # auto|cpu|gpu; auto = cpu for now; GPU is float32, Kerr only
-# Output:  runs/<timestamp>_<name>/ (status/coord1/coord2/phi txt, image.png, run.json)
+# Output:  runs/<timestamp>_<name>/ (outputs.npz, image.png, run.json)
 name = "kerr_a0.9_nodisk"
 
 [spacetime]
@@ -16,7 +16,7 @@ distance = 15.0
 theta0   = 90.0
 
 [grid]
-n = 160
+n = 320
 
 [plot]
 palette = "grey_black_white"
