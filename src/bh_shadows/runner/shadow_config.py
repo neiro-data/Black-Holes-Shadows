@@ -17,6 +17,7 @@ HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
 RUNS_DIR = Path("runs")
 _STAMP_RE = re.compile(r"\d{8}_\d{6}")
 OBSERVER_Z_OFFSET = 0.07  # Weyl units; observer height when `off_plane` is on (tune by eye)
+ESCAPE_RADIUS = 30.0  # rays count as escaped here in every tracer; the largest allowed distance
 
 
 def _now_stamp() -> str:
@@ -96,6 +97,10 @@ class ShadowConfig:
             raise ValueError(f"MD must be >= 0, got {self.MD}")
         if self.b <= 0:
             raise ValueError(f"b must be > 0, got {self.b}")
+        if self.distance > ESCAPE_RADIUS:
+            raise ValueError(
+                f"distance must be <= {ESCAPE_RADIUS} (the escape radius), got {self.distance}"
+            )
         if self.n <= 0 or self.n % 2:
             raise ValueError(f"n must be a positive even integer, got {self.n}")
         if self.a != 0 and self.MD > 0:
@@ -125,8 +130,8 @@ class ShadowConfig:
             raise ValueError(
                 f"grid_width_deg must satisfy 0 < x < step/2, got {self.grid_width_deg}"
             )
-        if self.grid_mode not in ("theta", "end_z", "flat_angle"):
-            raise ValueError(f"grid_mode must be theta|end_z|flat_angle, got {self.grid_mode!r}")
+        if self.grid_mode not in ("theta", "flat_angle"):
+            raise ValueError(f"grid_mode must be theta|flat_angle, got {self.grid_mode!r}")
         if not 0 <= self.disk_alpha <= 1:
             raise ValueError(f"disk_alpha must satisfy 0 <= x <= 1, got {self.disk_alpha}")
         if self.light_source and self.background not in ("two_color", "four_color"):
@@ -215,7 +220,7 @@ class ShadowConfig:
             "device_opt": self.device_opt,
             "matrix_source": self.matrix_source if weyl else None,
             "n_grid": self.n_grid if weyl else None,
-            "palette": self.palette,
+            "palette": self.palette if self.background == "palette" else None,
             "background": self.background,
             "grid": self.grid,
             "image_path": self.image_path or None,
@@ -305,6 +310,8 @@ class ShadowConfig:
         d = asdict(self)
         disk = d["disk_visible_opt"]
         disk_s = f'"{disk}"' if isinstance(disk, str) else str(disk).lower()
+        # Only the `palette` background reads `palette`; omit it elsewhere so it does not mislead.
+        palette_s = f'palette = "{d["palette"]}"\n' if d["background"] == "palette" else ""
         return (
             f'name = "{self.run_name}"\n\n'
             f"[spacetime]\nM = {d['M']}\na = {d['a']}\nMD = {d['MD']}\nb = {d['b']}\n\n"
@@ -314,7 +321,7 @@ class ShadowConfig:
             f"[tracer]\ndisk_visible = {disk_s}\nparallel = {str(d['parallel']).lower()}\n"
             f'backend = "{d["backend_opt"]}"\ndevice = "{d["device_opt"]}"\n\n'
             f'[matrix]\nn_grid = {d["n_grid"]}\nsource = "{d["source_opt"]}"\n\n'
-            f'[plot]\npalette = "{d["palette"]}"\nbackground = "{d["background"]}"\n'
+            f'[plot]\n{palette_s}background = "{d["background"]}"\n'
             f"grid = {str(d['grid']).lower()}\ngrid_step_deg = {d['grid_step_deg']}\n"
             f'grid_width_deg = {d["grid_width_deg"]}\ngrid_mode = "{d["grid_mode"]}"\n'
             f"disk_alpha = {d['disk_alpha']}\n"

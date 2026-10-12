@@ -5,7 +5,7 @@ Referenced from [README.md](../README.md).
 
 The lambda lookup matrix is a compressed NumPy archive (`matrices/lambda_M*_MD*_b*_n*.npz`, key
 `lam`). `np.savez_compressed` writes it, and `weyl_core.load_matrix` reads it. The runner writes one `outputs.npz` per run (keys `status`, `coord1`,
-`coord2`, and `phi` for Kerr).
+`coord2`, `phi`) for Kerr and Weyl.
 
 ## Pipeline
 
@@ -35,6 +35,18 @@ parameters. `ensure_matrix` refuses a file whose sidecar does not match the requ
 `load_matrix` sets a module-level matrix inside `weyl_core`. Call it before the first trace, or
 the tracer runs against no matrix.
 
+## Config key — [observer] distance
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `distance` | float | `15.0` | Observer radius. Kerr: Boyer-Lindquist `r`. Weyl: circumferential radius `sqrt(g_phiphi)`. |
+
+`distance` must be at most `ESCAPE_RADIUS` (30, in `shadow_config.py`). Every tracer marks a ray as
+escaped at this radius, so an observer beyond it gets no shadow. A larger value raises
+`ValueError`. At exactly 30, the Weyl tracer can mark every ray as escaped at the observer; Kerr
+works. Keep well below 30 for image backgrounds: the end angles are read at the escape
+radius, and the sky distorts when the observer is close to it.
+
 ## Config key — [observer] off_plane
 
 | Key | Type | Default | Meaning |
@@ -56,7 +68,7 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 | `grid` | bool | `false` | celestial-sphere lines; an error with `palette` and `black_hole` |
 | `grid_step_deg` | float | `10.0` | 0 < x <= 90 |
 | `grid_width_deg` | float | `0.4` | 0 < x < step/2 |
-| `grid_mode` | str | `"theta"` | `theta`, `end_z` (Weyl only) or `flat_angle` (Weyl only: lines straight in flat space, bent by the black hole); needs `grid = true` |
+| `grid_mode` | str | `"theta"` | `theta` or `flat_angle` (Weyl only: lines straight in flat space, bent by the black hole); needs `grid = true` |
 | `disk_alpha` | float | `0.6` | 0 to 1; disk opacity for `two_color`, `four_color`, `image` |
 | `light_source` | bool | `false` | white glow behind the black hole; only with `two_color`, `four_color` |
 | `light_alpha` | float | `0.7` | 0 to 1; glow peak opacity |
@@ -70,9 +82,9 @@ Colours: `four_color` is upper-left red, upper-right green, lower-left yellow, l
 `black_hole` is white sky and black shadow. Captured pixels are black, failed pixels red.
 
 Directions come from the arrays already traced. Kerr: theta is `coord2`, phi is `phi`. Weyl:
-theta is `pi - atan2(rho, z)` from `coord1`/`coord2`, and phi is a flat-sky approximation from the
-pixel column (`pi + PHI_LEFT_SIGN * beta`), so Weyl grid phi lines and `image` columns are
-approximate. A disk pixel has no direction behind the disk, so it is `disk_alpha * white` over a
+theta is `pi - atan2(rho, z)` from `coord1`/`coord2`, and phi is the traced `phi`. An old Weyl
+`outputs.npz` without `phi` uses a flat-sky phi from the pixel column
+(`pi + PHI_LEFT_SIGN * beta`) and logs a warning. A disk pixel has no direction behind the disk, so it is `disk_alpha * white` over a
 fixed dark grey (`visuals.DISK_BACKDROP`, 0.25); `greyscale` draws it opaque white.
 
 The light source is a Gaussian glow around the point behind the observer (`theta = pi - theta0`,

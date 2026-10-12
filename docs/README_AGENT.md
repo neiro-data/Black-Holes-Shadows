@@ -39,8 +39,9 @@ it is.
 ## Plot visuals
 
 `plots/visuals.py` colours the final image from the arrays the tracers already return; it never traces.
-Weyl `coord*` keep their sentinels (capture `[0.001, 0.001]`, disk `z + 50`) and have no phi, so
-Weyl phi is a flat-sky approximation from the pixel column. See SCHEMA.md `[plot]`.
+Weyl `coord*` keep their sentinels (capture `[0.001, 0.001]`, disk `z + 50`). Weyl traces `phi`
+on CPU and GPU, like Kerr. Only an old Weyl `outputs.npz` without `phi` falls back to a flat-sky phi
+from the pixel column. See SCHEMA.md `[plot]`.
 
 ## Relation to the other repository
 

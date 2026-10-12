@@ -51,15 +51,8 @@ DISK_BACKDROP = np.array([0.25, 0.25, 0.25])  # colour behind a semi-transparent
 
 _TWO_PI = 2 * np.pi
 
-# `grid_mode = "end_z"` (Weyl): z lines every Z_LINE_SPACING end-z units from Z_LINE_TOP, half
-# width END_Z_DZ; phi lines have half width END_Z_DANG (rad).
-Z_LINE_TOP = 30.0
-Z_LINE_SPACING = 60.0 / 18.0
-END_Z_DZ = 0.06
-END_Z_DANG = 0.01
-
 # `grid_mode = "flat_angle"` (Weyl): lines on the flat-space angles (alpha_e, beta_e) of the ray end
-# point, same half width (rad) in both directions: 1.5 * (half the central end-z phi line width).
+# point, same half width (rad) in both directions.
 FLAT_ANGLE_HALF_WIDTH = 1.5 * 0.0123 / 4
 
 
@@ -227,36 +220,6 @@ def grid_mask(theta: np.ndarray, phi: np.ndarray, step_deg: float, width_deg: fl
         return (dth <= w) | (dph * np.sin(theta) <= w)
 
 
-def grid_mask_end_z(z_end: np.ndarray, phi: np.ndarray, step_deg: float) -> np.ndarray:
-    """Return the mask of the Weyl end-z grid lines.
-
-    A z line is on `|z_end - (Z_LINE_TOP - k*Z_LINE_SPACING)| <= END_Z_DZ` for k = 0..18. A phi
-    line is on `|phi - k*step| <= END_Z_DANG`.
-
-    Parameters
-    ----------
-    z_end : np.ndarray
-        End z of each ray (`coord2`).
-    phi : np.ndarray
-        Escape azimuth in radians.
-    step_deg : float
-        Phi line spacing in degrees.
-
-    Returns
-    -------
-    np.ndarray
-        True on a grid line. NaN inputs give False.
-    """
-    z_end = np.asarray(z_end, dtype=float)
-    step = np.deg2rad(step_deg)
-    with np.errstate(invalid="ignore"):
-        k = np.clip(np.round((Z_LINE_TOP - z_end) / Z_LINE_SPACING), 0, 18)
-        dz = np.abs(z_end - (Z_LINE_TOP - k * Z_LINE_SPACING))
-        pr = np.asarray(phi, dtype=float) / step
-        dph = np.abs(pr - np.round(pr)) * step
-        return (dz <= END_Z_DZ) | (dph <= END_Z_DANG)
-
-
 def flat_end_angles(
     rho_end: np.ndarray, z_end: np.ndarray, phi: np.ndarray, distance: float, z_obs: float = 0.0
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -420,7 +383,7 @@ def compose_rgb(
     spec : VisualSpec
         Visual options.
     z_end : np.ndarray, optional
-        End z of each ray. Needed when `spec.grid_mode` is `end_z` or `flat_angle`.
+        End z of each ray. Needed when `spec.grid_mode == "flat_angle"`.
     rho_end : np.ndarray, optional
         End rho of each ray. Needed when `spec.grid_mode == "flat_angle"`.
 
@@ -449,10 +412,6 @@ def compose_rgb(
             mask = grid_mask_flat_angle(
                 rho_end, z_end, phi, spec.distance, spec.step_deg, spec.z_obs
             )
-        elif spec.grid_mode == "end_z":
-            if z_end is None:
-                raise ValueError("grid_mode 'end_z' needs z_end")
-            mask = grid_mask_end_z(z_end, phi, spec.step_deg)
         else:
             mask = grid_mask(theta, phi, spec.step_deg, spec.width_deg)
         sky = np.where(mask[..., None], GRID_COLOR, sky)

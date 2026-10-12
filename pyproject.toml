@@ -1,5 +1,5 @@
 [project]
-name = "black-holes-shadows-one-shot-effort-medium-low"
+name = "black-holes-shadows"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -45,9 +45,19 @@ ignore = ["S101"]
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.15.22",
+    "types-tqdm>=4.70.0.20260906",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+# No stubs or py.typed marker upstream; mlx is the optional `gpu` extra.
+module = ["scipy.*", "mlx.*"]
+ignore_missing_imports = true

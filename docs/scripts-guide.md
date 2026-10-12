@@ -23,7 +23,7 @@ uv run bh-shadow configs/kerr_a0.9_nodisk.toml --n 16
   in `run.json` as `numba_threads`.
 - **Output folder:** `runs/<YYYYMMDD_HHMMSS>_<name>/` (local time). Each run gets its own folder.
 - **Files:** `config.resolved.toml`, `run.json`, `outputs.npz` (keys `status`, `coord1`, `coord2`,
-  `phi` for Kerr), `image.png`.
+  `phi`), `image.png`.
 - **Visuals:** set `[plot] background` (see [SCHEMA.md](SCHEMA.md#config-keys--plot)). The image
   is composed from the saved arrays by `bh_shadows.plots.visuals`. Examples:
   `uv run bh-shadow configs/examples/visual_two_color.toml --n 16`, and likewise
@@ -48,10 +48,15 @@ run this command first. The table covers `rho` in [0, 40] and `z` in [-40, 40]. 
 ## Checks
 
 ```bash
-uv run ruff format .   # format
-uv run ruff check .    # lint
-uv run pytest          # tests in tests/
+uv run ruff format .     # format
+uv run ruff check .      # lint
+uv run python -m pytest  # tests in tests/
 ```
+
+Use `uv run python -m pytest`, not `uv run pytest`. If `.venv` was copied from another clone, the
+`.venv/bin/pytest` script keeps a shebang to that clone's Python, and the tests fail with
+`ModuleNotFoundError: No module named 'bh_shadows'`. `python -m pytest` always uses this venv. To
+repair the scripts, delete `.venv` and run `uv sync`.
 
 The tests use grids of n of 64 or less. The repository has no type checker.
 

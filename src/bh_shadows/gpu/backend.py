@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import platform
 import sys
+from typing import Any
 
 import numpy as np
 
@@ -20,7 +21,7 @@ DEVICES = ("auto", "cpu", "gpu")
 AUTO_PREFERS_GPU = False
 THREADGROUP = 256
 
-_kernel_cache: dict[tuple[str, str], object] = {}
+_kernel_cache: dict[tuple[str, str], Any] = {}  # mlx stubs type kernels as `object`
 
 
 def gpu_available() -> bool:
@@ -113,7 +114,7 @@ def launch(
     import mlx.core as mx
 
     key = (name, header + source)
-    kernel = _kernel_cache.get(key)
+    kernel: Any = _kernel_cache.get(key)
     if kernel is None:
         kernel = mx.fast.metal_kernel(
             name=name,

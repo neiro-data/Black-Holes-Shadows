@@ -1,8 +1,8 @@
 # Image sky: an equirectangular picture is mapped onto the sky and lensed by the hole.
 # Schwarzschild, no disk; reuses the cached MD=0 matrix. `image` is resolved relative to THIS file.
-# sky_checker.png (128 x 64) is a checkerboard so the lensing distortion is easy to see.
+# milky_way.jpg (1024 x 1024) is a star field; it is not 2:1, so it is stretched in longitude.
 # Run:  uv run bh-shadow configs/examples/visual_image.toml --n 48
-# Weyl has no phi: left/right comes from the pixel column (flat-sky approximation, see SCHEMA.md).
+# Weyl traces phi, so left/right on the sky comes from the traced ray (see SCHEMA.md).
 
 name = "visual_image"
 
@@ -21,4 +21,4 @@ n = 160
 
 [plot]
 background = "image"
-image = "sky_checker.png"
+image = "milky_way.jpg"

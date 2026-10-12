@@ -15,6 +15,7 @@ import os
 import platform
 import time
 from collections.abc import Callable
+from typing import Any
 
 import numba
 import numpy as np
@@ -48,7 +49,9 @@ def limit_threads(fraction: float = CORE_FRACTION) -> int:
     int
         New thread count.
     """
-    n = max(1, min(int((os.cpu_count() or 1) * fraction), numba.config.NUMBA_NUM_THREADS))
+    # NUMBA_NUM_THREADS is set at import time through globals(), so mypy cannot see it.
+    limit: int = numba.config.NUMBA_NUM_THREADS  # type: ignore[attr-defined]
+    n = max(1, min(int((os.cpu_count() or 1) * fraction), limit))
     numba.set_num_threads(n)
     return n
 
@@ -458,10 +461,8 @@ def save_run(
     cfg.write_resolved()
     log.info("saving outputs.npz to %s", run_dir)
     t0 = time.perf_counter()
-    np.savez_compressed(
-        run_dir / "outputs.npz",
-        **{k: out[k] for k in ("status", "coord1", "coord2", "phi") if k in out},
-    )
+    arrays: dict[str, Any] = {k: out[k] for k in ("status", "coord1", "coord2", "phi") if k in out}
+    np.savez_compressed(run_dir / "outputs.npz", **arrays)
     log.info("outputs.npz saved in %.1fs", time.perf_counter() - t0)
     if cfg.save or cfg.show:
         log.info("rendering image (background=%s, n=%d)", cfg.background, cfg.n)
