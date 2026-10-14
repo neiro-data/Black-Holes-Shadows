@@ -47,6 +47,8 @@ GREY = np.array([0.505, 0.505, 0.505])
 BLACK = np.zeros(3)
 WHITE = np.ones(3)
 GRID_COLOR = BLACK
+DISK_SHADE_POWER = 0.75  # disk brightness ~ (b / rho)^0.75, like the Novikov-Thorne temperature
+DISK_SHADE_FLOOR = 0.15  # dimmest disk brightness, so the outer disk stays visible
 DISK_BACKDROP = np.array([0.25, 0.25, 0.25])  # colour behind a semi-transparent disk
 
 _TWO_PI = 2 * np.pi
@@ -73,6 +75,7 @@ class VisualSpec:
     grid_mode: str = "theta"
     distance: float = 15.0
     z_obs: float = 0.0  # observer z (non-zero for an off-plane Weyl observer)
+    disk_inner: float = 6.0  # disk inner radius b (brightest point of "shaded_disk")
 
     @classmethod
     def from_config(cls, cfg) -> VisualSpec:
@@ -88,8 +91,6 @@ class VisualSpec:
         VisualSpec
             Visual options.
         """
-        from bh_shadows.runner.shadow_config import OBSERVER_Z_OFFSET
-
         sky = load_sky_image(cfg.image_path) if cfg.background == "image" else None
         return cls(
             background=cfg.background,
@@ -98,7 +99,8 @@ class VisualSpec:
             width_deg=cfg.grid_width_deg,
             grid_mode=cfg.grid_mode,
             distance=cfg.distance,
-            z_obs=OBSERVER_Z_OFFSET if cfg.off_plane else 0.0,
+            z_obs=cfg.observer_z,
+            disk_inner=cfg.b,
             disk_alpha=cfg.disk_alpha,
             sky=sky,
             light_source=cfg.light_source,
@@ -225,7 +227,7 @@ def flat_end_angles(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the flat-space pixel angles that would reach each ray end point.
 
-    The end point `(rho, phi, -z)` is joined to the observer at `x = distance`, `z = z_obs` by a
+    The end point `(rho, phi, z)` is joined to the observer at `x = distance`, `z = z_obs` by a
     straight line.
     The angles of that line (sign convention of the traced runs) are `alpha_e`, `beta_e`. Without
     a black hole they equal the pixel angles, so lines of constant `alpha_e` or `beta_e` are
@@ -248,7 +250,7 @@ def flat_end_angles(
     rho_end = np.asarray(rho_end, dtype=float)
     dx = rho_end * np.cos(phi) - distance
     dy = rho_end * np.sin(phi)
-    dz = z_obs - np.asarray(z_end, dtype=float)
+    dz = np.asarray(z_end, dtype=float) - z_obs
     norm = np.sqrt(dx**2 + dy**2 + dz**2)
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.arcsin(dz / norm), np.arctan2(-dy, -dx)
@@ -329,7 +331,7 @@ def light_weight(
 def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.ndarray, np.ndarray]:
     """Return the escape angles of each pixel.
 
-    Kerr uses `theta = coord2` and the traced `phi`. Weyl uses `theta = pi - atan2(rho, z)` and the
+    Kerr uses `theta = coord2` and the traced `phi`. Weyl uses `theta = atan2(rho, z)` and the
     traced `phi`. A legacy Weyl dict without `phi` uses the flat-sky value
     `pi + PHI_LEFT_SIGN * beta` and the function logs a warning.
 
@@ -349,8 +351,7 @@ def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.nd
     if cfg.backend == "kerr":
         theta, phi = np.asarray(out["coord2"], float), np.asarray(out["phi"], float)
     else:
-        # _mirror4 negates z on the lower array rows (drawn at the image top), so flip theta
-        theta = np.pi - np.arctan2(out["coord1"], out["coord2"])
+        theta = np.arctan2(out["coord1"], out["coord2"])
         if "phi" in out:
             phi = np.asarray(out["phi"], float)
             return np.where(esc, theta, np.nan), np.where(esc, np.mod(phi, _TWO_PI), np.nan)
@@ -358,6 +359,30 @@ def sky_directions(out: dict[str, np.ndarray], cfg: ShadowConfig) -> tuple[np.nd
         beta = np.linspace(cfg.half_angle, -cfg.half_angle, esc.shape[1])
         phi = np.broadcast_to(np.pi + PHI_LEFT_SIGN * beta, esc.shape)
     return np.where(esc, theta, np.nan), np.where(esc, np.mod(phi, _TWO_PI), np.nan)
+
+
+def disk_shade(rho_end: np.ndarray, b: float) -> np.ndarray:
+    """Return the disk brightness at each end radius.
+
+    The brightness falls as `(b / rho) ** DISK_SHADE_POWER` (a Novikov-Thorne-like temperature
+    law), is clipped to `[DISK_SHADE_FLOOR, 1]`, and is 0 where `rho_end` is NaN.
+
+    Parameters
+    ----------
+    rho_end : np.ndarray
+        End rho of each ray. The legacy disk sentinel (+50) is stripped.
+    b : float
+        Disk inner radius.
+
+    Returns
+    -------
+    np.ndarray
+        Brightness in [0, 1].
+    """
+    r = np.where(rho_end > 50.0, rho_end - 50.0, rho_end)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        shade = np.clip((b / r) ** DISK_SHADE_POWER, DISK_SHADE_FLOOR, 1.0)
+    return np.nan_to_num(shade, nan=0.0)
 
 
 def compose_rgb(
@@ -372,7 +397,9 @@ def compose_rgb(
 
     Order of layers: sky, glow, grid, then captured, disk and failed pixels. Captured pixels are
     black. Failed pixels (status 3) are red. Disk pixels are white for "greyscale", black for
-    "black_hole", else `disk_alpha * white + (1 - disk_alpha) * DISK_BACKDROP`.
+    "black_hole", else `disk_alpha * white + (1 - disk_alpha) * DISK_BACKDROP`. The "shaded_disk"
+    background (Weyl only) draws only the disk, white at `b` and fading outward (`disk_shade`), on
+    black; it needs `rho_end`.
 
     Parameters
     ----------
@@ -397,6 +424,13 @@ def compose_rgb(
 
     if spec.background == "black_hole":
         rgb = np.where(escaped[..., None], WHITE, BLACK)
+        return np.where(failed[..., None], RED, rgb)
+
+    if spec.background == "shaded_disk":
+        if rho_end is None:
+            raise ValueError("background 'shaded_disk' needs rho_end")
+        shade = disk_shade(np.asarray(rho_end, dtype=float), spec.disk_inner)[..., None]
+        rgb = np.where(disk[..., None], shade * WHITE, BLACK)
         return np.where(failed[..., None], RED, rgb)
 
     sky = sky_rgb(theta, phi, spec)

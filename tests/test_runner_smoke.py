@@ -228,11 +228,10 @@ def _off_plane_cfg(n=16, **extra):
     return sc.ShadowConfig.from_toml("configs/schwarzschild_disk.toml", ov)
 
 
-def test_off_plane_at_zero_offset_matches_quadrant_path(monkeypatch):
+def test_off_plane_at_zero_offset_matches_quadrant_path():
     """Full-alpha trace at z0 = 0 reproduces the mirrored quadrant (settles the z sign, D4)."""
     ref = rs.trace_grid(_off_plane_cfg(), progress=False)
-    monkeypatch.setattr(rs, "OBSERVER_Z_OFFSET", 0.0)
-    got = rs.trace_grid(_off_plane_cfg(off_plane=True), progress=False)
+    got = rs.trace_grid(_off_plane_cfg(off_plane=True, z0=0.0), progress=False)
     assert np.array_equal(ref["status"], got["status"])
     # only escaped pixels carry a sky direction (disk hits store z + 50; the old mirror flips it)
     keep = ref["status"] == 0
@@ -256,6 +255,43 @@ def test_off_plane_symmetry_and_asymmetry():
     # disk hits are not symmetric about the middle row
     disk = out["status"] == 2
     assert disk.any() and not np.array_equal(disk, disk[::-1])
+
+
+def test_off_plane_orientation_top_rows_look_up():
+    cfg = _off_plane_cfg(off_plane=True, z0=1.0, disk_visible_opt=True)
+    out = rs.trace_grid(cfg, progress=False)
+    top = out["status"][-4:] == 0
+    assert top.any() and (out["coord2"][-4:][top] > 0).all()
+    disk = out["status"] == 2
+    # images are drawn with origin="lower": array row 0 is the image bottom
+    assert disk[: cfg.n // 2].sum() > disk[cfg.n // 2 :].sum()
+    rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=1.0, target_gpp_sqrt=cfg.distance)
+    _, z_end, _ = wc.f_paral(
+        rho0, 0.0, 1.0, 0.0, 6.0, np.array([0.3]), np.array([0.0]), rs.HDER, False
+    )
+    assert z_end[0, 0] > 0
+
+
+def test_plane_mode_keeps_status_symmetry_and_up_on_top():
+    out = rs.trace_grid(_off_plane_cfg(disk_visible_opt=True), progress=False)
+    assert np.array_equal(out["status"], out["status"][::-1])
+    top = out["status"][-1:] == 0
+    assert top.any() and (out["coord2"][-1:][top] > 0).all()
+
+
+def test_disk_outer_hides_far_disk_only():
+    base = _off_plane_cfg(off_plane=True, z0=1.0, disk_visible_opt=True)
+    full_run = rs.trace_grid(base, progress=False)
+    cut = rs.trace_grid(
+        _off_plane_cfg(off_plane=True, z0=1.0, disk_visible_opt=True, disk_outer=10.0),
+        progress=False,
+    )
+    assert not (cut["coord1"][cut["status"] == 2] >= 10.0).any()
+    near = (full_run["status"] == 2) & (full_run["coord1"] < 10.0)
+    assert np.array_equal(cut["status"][near], full_run["status"][near])
+    assert np.array_equal(cut["coord1"][near], full_run["coord1"][near])
+    far = (full_run["status"] == 2) & (full_run["coord1"] >= 10.0)
+    assert far.any() and (cut["status"][far] != 2).any()
 
 
 def test_off_plane_default_is_off():

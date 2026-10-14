@@ -58,7 +58,8 @@ def classify_shadow_disk(
     """Classify each Weyl pixel from its end state.
 
     The function reads the sentinels of `weyl_core.func`: capture gives `[0.001, 0.001]` and a disk
-    hit gives `[rho, z + 50]`.
+    hit gives `[rho, z + 50]`. Rays that cross the plane beyond `disk_outer` never get the disk
+    sentinel, so they are not classified as disk here.
 
     Parameters
     ----------

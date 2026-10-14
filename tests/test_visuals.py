@@ -66,9 +66,28 @@ def test_disk_alpha_blend_exact(alpha):
 
 def test_status3_is_red_in_every_background():
     status = np.full((2, 2), 3)
-    for bg in ("black_hole", "two_color", "greyscale", "four_color"):
-        rgb = v.compose_rgb(status, full(np.nan, 2), full(np.nan, 2), spec(background=bg))
+    for bg in ("black_hole", "two_color", "greyscale", "four_color", "shaded_disk"):
+        rgb = v.compose_rgb(
+            status, full(np.nan, 2), full(np.nan, 2), spec(background=bg), rho_end=full(np.nan, 2)
+        )
         assert np.array_equal(rgb[0, 0], v.RED), bg
+
+
+def test_shaded_disk_fades_outward_on_black():
+    status = np.array([[0, 1], [2, 2]])
+    rho = np.array([[20.0, 0.001], [6.0, 12.0]])
+    rgb = v.compose_rgb(
+        status,
+        full(1.0, 2),
+        full(1.0, 2),
+        spec(background="shaded_disk", disk_inner=6.0),
+        rho_end=rho,
+    )
+    assert np.array_equal(rgb[0, 0], v.BLACK) and np.array_equal(rgb[0, 1], v.BLACK)
+    assert np.array_equal(rgb[1, 0], v.WHITE)
+    assert 0 < rgb[1, 1, 0] < 1 and np.allclose(rgb[1, 1], rgb[1, 1, 0])
+    with pytest.raises(ValueError, match="rho_end"):
+        v.compose_rgb(status, full(1.0, 2), full(1.0, 2), spec(background="shaded_disk"))
 
 
 def test_nan_angles_on_escaped_pixels_do_not_crash():
@@ -210,11 +229,11 @@ def test_sky_directions_kerr_and_weyl():
     assert np.isclose(ph[0, 0], 7.0 - 2 * np.pi)
     weyl = {"status": status, "coord1": full(1.0, 2), "coord2": full(1.0, 2)}
     th, ph = v.sky_directions(weyl, WeylCfg)  # legacy dict without phi: flat-sky fallback
-    assert np.isclose(th[0, 0], np.pi - np.pi / 4) and np.isnan(ph[0, 1])
+    assert np.isclose(th[0, 0], np.pi / 4) and np.isnan(ph[0, 1])
     assert 0 <= ph[0, 0] < 2 * np.pi
     traced = weyl | {"phi": full(7.0, 2)}
     th, ph = v.sky_directions(traced, WeylCfg)
-    assert np.isclose(th[0, 0], np.pi - np.pi / 4)
+    assert np.isclose(th[0, 0], np.pi / 4)
     assert np.isclose(ph[0, 0], 7.0 - 2 * np.pi)
 
 
@@ -224,11 +243,11 @@ def test_flat_end_angles_recover_pixel_angles():
     ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
     t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R**2)
     x, y, z = d + t * ux, t * uy, t * uz
-    ae, be = v.flat_end_angles(np.hypot(x, y), -z, np.arctan2(y, x), d)
+    ae, be = v.flat_end_angles(np.hypot(x, y), z, np.arctan2(y, x), d)
     np.testing.assert_allclose(ae, a, atol=1e-12)
     np.testing.assert_allclose(be, b, atol=1e-12)
     step = 10.0
-    m = v.grid_mask_flat_angle(np.hypot(x, y), -z, np.arctan2(y, x), d, step)
+    m = v.grid_mask_flat_angle(np.hypot(x, y), z, np.arctan2(y, x), d, step)
     assert m[np.abs(a) <= v.FLAT_ANGLE_HALF_WIDTH].all()  # alpha = 0 line is a full row band
     assert not v.grid_mask_flat_angle(*(np.array([np.nan]),) * 3, d, step).any()
 
@@ -238,7 +257,11 @@ def test_flat_end_angles_off_plane_observer():
     a, b = np.meshgrid(np.linspace(-0.5, 0.5, 9), np.linspace(-0.5, 0.5, 9), indexing="ij")
     ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
     t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R**2)
-    x, y, z = d + t * ux, t * uy, z0 - t * uz  # stored z: observer height, alpha sign flipped
+    x, y, z = (
+        d + t * ux,
+        t * uy,
+        z0 + t * uz,
+    )  # stored z: observer height plus the straight-line rise
     ae, be = v.flat_end_angles(np.hypot(x, y), z, np.arctan2(y, x), d, z0)
     np.testing.assert_allclose(ae, a, atol=1e-12)
     np.testing.assert_allclose(be, b, atol=1e-12)

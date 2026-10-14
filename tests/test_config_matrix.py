@@ -238,3 +238,44 @@ def test_off_plane_accepted_and_roundtrips(tmp_path):
     q = write_cfg(tmp_path, cfg.to_toml())
     assert ShadowConfig.from_toml(q).off_plane
     assert cfg.to_metadata()["off_plane"] is True
+
+
+def test_observer_z_default_and_z0(tmp_path):
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""))
+    assert cfg.observer_z == 0.0
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"off_plane": True})
+    assert cfg.observer_z == 0.07
+    cfg = ShadowConfig.from_toml(write_cfg(tmp_path, ""), {"off_plane": True, "z0": 1.0})
+    assert cfg.observer_z == 1.0
+
+
+@pytest.mark.parametrize(
+    "ov",
+    [
+        {"z0": 1.0, "a": 0.5, "off_plane": True},  # Kerr
+        {"z0": 1.0},  # no off_plane
+        {"z0": 15.0, "off_plane": True},  # |z0| >= distance
+        {"z0": float("nan"), "off_plane": True},
+        {"disk_outer": 6.0},  # <= b
+        {"disk_outer": 12.0, "a": 0.5},  # finite with Kerr
+        {"background": "shaded_disk", "a": 0.5},
+        {"background": "shaded_disk", "grid": True},
+    ],
+)
+def test_z0_disk_outer_shaded_disk_errors(tmp_path, ov):
+    with pytest.raises(ValueError):
+        ShadowConfig.from_toml(write_cfg(tmp_path, ""), ov)
+
+
+@pytest.mark.parametrize("outer", [12.0, float("inf")])
+def test_z0_disk_outer_roundtrip_and_run_json(tmp_path, outer):
+    cfg = ShadowConfig.from_toml(
+        write_cfg(tmp_path, ""),
+        {"off_plane": True, "z0": 1.0, "disk_outer": outer, "background": "shaded_disk"},
+    )
+    back = ShadowConfig.from_toml(write_cfg(tmp_path, cfg.to_toml()))
+    assert (back.z0, back.disk_outer, back.background) == (1.0, outer, "shaded_disk")
+    meta = cfg.to_metadata()
+    assert meta["z0"] == 1.0 and meta["observer_z"] == 1.0
+    assert meta["disk_outer"] == (None if outer == float("inf") else outer)
+    json.dumps(meta, allow_nan=False)

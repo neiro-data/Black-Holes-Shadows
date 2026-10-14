@@ -60,7 +60,8 @@ The config selects the spacetime through `[spacetime]` (`M`, `a`, `MD`, `b`). `M
 | Kerr | `a > 0`, `MD = 0` | Kerr (no table). |
 
 `[observer] off_plane = true` (default `false`) moves the Weyl observer slightly above the disk plane
-(`z = OBSERVER_Z_OFFSET` in `shadow_config.py`) so the disk is not seen edge-on. It needs the Weyl
+(`z = OBSERVER_Z_OFFSET` in `shadow_config.py`, or `[observer] z0` for a chosen height) so the disk
+is not seen edge-on. `[tracer] disk_outer` sets the outer visible radius of the disk. It needs the Weyl
 backend (with or without a disk); Kerr raises `ValueError`. The equator symmetry
 is lost, so the run traces twice as many rays. Example: `configs/schwarzschild_disk_MD0.6_off_plane.toml`.
 
@@ -80,12 +81,13 @@ tracing time. Set the keys in the `[plot]` table of the config. All keys are in
 - `four_color`: one colour for each sky quadrant (upper left red, upper right green, lower left
   yellow, lower right blue).
 - `greyscale`: grey sky and a white disk.
+- `shaded_disk` (Weyl only): black sky, only the disk is drawn, brighter at the inner edge.
 - `image`: puts an equirectangular picture on the sky. Set its path with `image`. The path is
   relative to the config file.
 
 **Grid** (`grid = true`):
 
-- Draws lines on the celestial sphere. You cannot use it with `palette` or `black_hole`.
+- Draws lines on the celestial sphere. You cannot use it with `palette`, `black_hole` or `shaded_disk`.
 - `grid_mode = "theta"` (default): lines of constant theta and phi.
 - `grid_mode = "flat_angle"` (Weyl only): horizontal and vertical lines of equal width. The lines
   are straight without a black hole. The black hole bends them.

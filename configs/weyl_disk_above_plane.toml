@@ -1,0 +1,32 @@
+# Example: Schwarzschild black hole inside a light Morgan-Morgan disk, observer above the disk plane
+# (off_plane = true, z0 = 1.0: elevation ~ atan(1 / 15) = 3.8 deg; Weyl only). The disk is visible
+# from b = 6 to disk_outer = 12 and drawn brighter at the inner edge on a black sky. Traces twice
+# the rays of a plane observer.
+# Run:     uv run bh-shadow configs/weyl_disk_above_plane.toml --n 512
+# Output:  runs/<timestamp>_<name>/ (outputs.npz, image.png, run.json)
+name = "weyl_disk_above_plane"
+
+[spacetime]
+M  = 0.9
+a  = 0.0
+MD = 0.1      # light disk, so it bends rays only slightly
+b  = 6.0      # inner radius of the disk
+
+[observer]
+distance = 29.0
+off_plane = true
+z0 = 1.5       # observer height (Weyl units); elevation ~ atan(z0 / distance)
+
+[grid]
+n = 512
+
+[tracer]
+disk_visible = true
+disk_outer = 12.0   # visible outer radius of the disk (visibility cut only)
+
+[matrix]
+n_grid = 1200
+source = "auto"
+
+[plot]
+background = "shaded_disk"   # black sky, disk white at b fading outward
