@@ -274,8 +274,10 @@ def test_weyl_gpu_fallback_retraces_status3(tmp_path, monkeypatch):
     )
     flagged = [(0, 1), (2, 3), (7, 7), (4, 0)]
 
-    def stub(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
-        Mat, Mz, Mphi = wc.f_paral(rho0, z0, M, MD, b, alpha, beta, rs.HDER, disk_visible)
+    def stub(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam, disk_outer):
+        Mat, Mz, Mphi = wc.f_paral(
+            rho0, z0, M, MD, b, alpha, beta, rs.HDER, disk_visible, disk_outer
+        )
         st = np.zeros(Mat.shape, dtype=np.int64)
         for i, j in flagged:
             if i < len(alpha):
@@ -389,3 +391,24 @@ def test_weyl_gpu_agrees_real_quadrature_table(tmp_path):
     assert m["cpu_disk_pixels"] > 0
     assert m["median_dcoord1_escape"] < 1e-3 and m["median_dcoord2_escape"] < 1e-3
     assert m["median_dcoord1_disk"] < 1e-2
+
+
+def test_weyl_gpu_disk_outer_agrees_with_cpu(tmp_path, monkeypatch):
+    _gpu_or_skip()
+    cfg0 = sc.ShadowConfig.from_toml("configs/schwarzschild_disk.toml")
+    _seed_matrix(tmp_path, monkeypatch, cfg0.M, cfg0.MD, cfg0.b)
+    wc.load_matrix(str(gm.ensure_matrix(cfg0.M, cfg0.MD, cfg0.b, WEYL_N_GRID)))
+    _frozen_or_skip(wc.Mat_nu)
+    base = {"n": 64, "name": "outer", "n_grid": WEYL_N_GRID, "disk_outer": 10.0}
+    cpu = rs.trace_grid(
+        sc.ShadowConfig.from_toml("configs/schwarzschild_disk.toml", base | {"device_opt": "cpu"}),
+        progress=False,
+    )
+    gpu = rs.trace_grid(
+        sc.ShadowConfig.from_toml("configs/schwarzschild_disk.toml", base | {"device_opt": "gpu"}),
+        progress=False,
+    )
+    assert rs.RUN_STATS["device"] == "gpu"
+    mism = cpu["status"] != gpu["status"]
+    assert mism.sum() <= 0.01 * mism.size
+    assert not (gpu["coord1"][gpu["status"] == 2] >= 10.0).any()

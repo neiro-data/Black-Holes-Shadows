@@ -19,7 +19,7 @@ from bh_shadows.runner import shadow_config as sc
 R_ESC = 30.0
 
 
-def flat_run(cfg: sc.ShadowConfig, z_sign: float = -1.0) -> dict[str, np.ndarray]:
+def flat_run(cfg: sc.ShadowConfig, z_sign: float = 1.0) -> dict[str, np.ndarray]:
     """Return a run dict for straight rays (all escaped).
 
     Parameters
@@ -37,7 +37,7 @@ def flat_run(cfg: sc.ShadowConfig, z_sign: float = -1.0) -> dict[str, np.ndarray
     alpha, beta = rs._angles(cfg)
     a, b = np.meshgrid(alpha, beta, indexing="ij")
     d = cfg.distance
-    z0 = sc.OBSERVER_Z_OFFSET if cfg.off_plane else 0.0
+    z0 = cfg.observer_z
     ux, uy, uz = -np.cos(a) * np.cos(b), -np.cos(a) * np.sin(b), np.sin(a)
     # |p0 + t u| = R: t^2 + 2 d ux t + d^2 - R^2 = 0, positive root
     t = -d * ux + np.sqrt((d * ux) ** 2 - d**2 + R_ESC**2)
@@ -56,7 +56,7 @@ def main() -> None:
     p.add_argument("config")
     p.add_argument("out")
     p.add_argument("--n", type=int, default=1024)
-    p.add_argument("--z-sign", type=float, default=-1.0)
+    p.add_argument("--z-sign", type=float, default=1.0)
     args = p.parse_args()
     cfg = sc.ShadowConfig.from_toml(args.config, {"n": args.n, "show": False})
     vis.render_image(flat_run(cfg, args.z_sign), cfg, args.out)

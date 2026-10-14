@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import platform
 import time
@@ -26,7 +27,7 @@ from bh_shadows.core.matrix import ensure_matrix, matrix_path
 from bh_shadows.gpu.backend import resolve_device
 from bh_shadows.plots import visuals
 from bh_shadows.plots.weyl_plot import classify_shadow_disk, mirror_quadrants, plot_status
-from bh_shadows.runner.shadow_config import OBSERVER_Z_OFFSET, ShadowConfig
+from bh_shadows.runner.shadow_config import ESCAPE_RADIUS, ShadowConfig
 
 log = logging.getLogger(__name__)
 
@@ -207,10 +208,10 @@ def _trace_weyl(
     """Trace a Weyl (static) run.
 
     The spacetime is symmetric about the equator and about the image centre. The function traces one
-    quadrant and mirrors it. With `cfg.off_plane` the observer is at `z = OBSERVER_Z_OFFSET`, the
+    quadrant and mirrors it. With `cfg.off_plane` the observer is at `z = cfg.observer_z`, the
     equator symmetry is lost, and the function traces all alpha rows and half of the beta columns
     (twice the rays) and mirrors the columns only. On the GPU, it traces the status-3 pixels again
-    on the CPU.
+    on the CPU. The tracer's alpha > 0 looks up (+z), so the top image rows end at z > 0.
 
     Parameters
     ----------
@@ -236,8 +237,14 @@ def _trace_weyl(
     mpath = ensure_matrix(cfg.M, cfg.MD, cfg.b, cfg.n_grid, cfg.matrix_source)
     wc.load_matrix(str(mpath))  # must precede the first trace
     RUN_STATS["matrix_s"] = round(time.perf_counter() - t_mat, 3)
-    z0 = OBSERVER_Z_OFFSET if cfg.off_plane else 0.0
+    z0 = cfg.observer_z
     rho0 = wc.solve_observer_rho(cfg.M, cfg.MD, cfg.b, z0=z0, target_gpp_sqrt=cfg.distance)
+    if not math.isfinite(rho0) or (
+        math.sqrt(wc.gpp(math.hypot(rho0, z0), 0.0, cfg.M, cfg.MD, cfg.b)) >= ESCAPE_RADIUS
+    ):
+        raise ValueError(f"observer at z0={z0}, distance={cfg.distance} starts outside the domain")
+    RUN_STATS["observer_rho0"] = float(rho0)
+    RUN_STATS["observer_z0"] = float(z0)
 
     alpha_full, beta_full = _angles(cfg)
     half = cfg.n // 2
@@ -253,14 +260,32 @@ def _trace_weyl(
             def tracer(s, e):
                 """Trace rows `s:e` on the GPU."""
                 return weyl_gpu.f_paral_gpu(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[s:e], beta, cfg.disk_visible, wc.Mat_nu
+                    rho0,
+                    z0,
+                    cfg.M,
+                    cfg.MD,
+                    cfg.b,
+                    alpha[s:e],
+                    beta,
+                    cfg.disk_visible,
+                    wc.Mat_nu,
+                    cfg.disk_outer,
                 )
         else:
 
             def tracer(s, e):
                 """Trace rows `s:e` on the CPU."""
                 return wc.f_paral(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha[s:e], beta, HDER, cfg.disk_visible
+                    rho0,
+                    z0,
+                    cfg.M,
+                    cfg.MD,
+                    cfg.b,
+                    alpha[s:e],
+                    beta,
+                    HDER,
+                    cfg.disk_visible,
+                    cfg.disk_outer,
                 )
 
         Mat, Mz, Mphi, *gpu_st = _chunked_rows(
@@ -278,7 +303,18 @@ def _trace_weyl(
             if fail.any():
                 ii, jj = np.nonzero(fail)
                 Mat[ii, jj], Mz[ii, jj], Mphi[ii, jj] = wc.retrace_points(
-                    rho0, z0, cfg.M, cfg.MD, cfg.b, alpha, beta, ii, jj, HDER, cfg.disk_visible
+                    rho0,
+                    z0,
+                    cfg.M,
+                    cfg.MD,
+                    cfg.b,
+                    alpha,
+                    beta,
+                    ii,
+                    jj,
+                    HDER,
+                    cfg.disk_visible,
+                    cfg.disk_outer,
                 )
             RUN_STATS["retrace_s"] = round(time.perf_counter() - t_re, 3)
             log.info("gpu: %d pixels re-traced on cpu", RUN_STATS["gpu_cpu_fallback_pixels"])
@@ -308,6 +344,7 @@ def _trace_weyl(
                     cfg.b,
                     HDER,
                     cfg.disk_visible,
+                    cfg.disk_outer,
                 )
 
     status = classify_shadow_disk(Mat, Mz, cfg.b)

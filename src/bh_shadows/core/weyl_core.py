@@ -524,8 +524,11 @@ def zeta(rho, z, M, MD, b):
 
 @jit(nopython=True)
 def dthe(rho, z, M, MD, b, alpha):
-    """Return the initial dz / dlambda of the ray for pixel angle `alpha`."""
-    return 1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alpha)
+    """Return the initial dz / dlambda of the ray for pixel angle `alpha`.
+
+    alpha > 0 looks up (+z). The minus sign is because rays are traced backward.
+    """
+    return -1 / np.sqrt(gzz(rho, z, M, MD, b)) * np.sin(alpha)
 
 
 @jit(nopython=True)
@@ -759,7 +762,7 @@ def geo(t, z, M, alpha, beta, rho0, z0, MD, b, hder):
 
 
 @jit(nopython=True)
-def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
+def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible, disk_outer):
     """Trace one ray until it is captured, escapes or hits the disk.
 
     Parameters
@@ -782,6 +785,8 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
         Finite-difference step.
     disk_visible : bool
         Stop the ray when it crosses the disk plane at rho > b.
+    disk_outer : float
+        Outer visible radius. A crossing at rho >= `disk_outer` is ignored (the ray goes on).
 
     Returns
     -------
@@ -806,7 +811,9 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
             yf = [0.001, 0.001, y[4]]
             break
 
-        elif disk_visible and y[0] > b and np.sign(y[2]) == -np.sign(y_prev[2]):
+        elif (
+            disk_visible and y[0] > b and y[0] < disk_outer and np.sign(y[2]) == -np.sign(y_prev[2])
+        ):
             yf = [y[0], y[2] + 50.0, y[4]]
             break
 
@@ -816,7 +823,7 @@ def func(y, x, h, alpha, beta, M, rho0, z0, MD, b, hder, disk_visible):
 
 
 @jit(nopython=True, parallel=True)
-def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
+def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False, disk_outer=np.inf):
     """Trace one ray for each pixel on all CPU cores (numba `prange`).
 
     Parameters
@@ -831,6 +838,8 @@ def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
         Finite-difference step.
     disk_visible : bool, optional
         Stop rays at the disk.
+    disk_outer : float, optional
+        Outer visible disk radius (see `func`). Default: no cut.
 
     Returns
     -------
@@ -854,14 +863,28 @@ def f_paral(rho0, z0, M, MD, b, alpha, beta, hder, disk_visible=False):
                 ]
             )
             (Mat[i, j], Mz[i, j], Mphi[i, j]) = func(
-                y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
+                y,
+                300.0,
+                -0.02,
+                alpha[i],
+                beta[j],
+                M,
+                rho0,
+                z0,
+                MD,
+                b,
+                hder,
+                disk_visible,
+                disk_outer,
             )
 
     return (Mat, Mz, Mphi)
 
 
 @jit(nopython=True, parallel=True)
-def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=False):
+def retrace_points(
+    rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=False, disk_outer=np.inf
+):
     """Trace selected pixels again in parallel. The rays are the same as in `f_paral`.
 
     Parameters
@@ -878,6 +901,8 @@ def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=F
         Finite-difference step.
     disk_visible : bool, optional
         Stop rays at the disk.
+    disk_outer : float, optional
+        Outer visible disk radius (see `func`). Default: no cut.
 
     Returns
     -------
@@ -902,7 +927,19 @@ def retrace_points(rho0, z0, M, MD, b, alpha, beta, ii, jj, hder, disk_visible=F
             ]
         )
         (Mat[p], Mz[p], Mphi[p]) = func(
-            y, 300.0, -0.02, alpha[i], beta[j], M, rho0, z0, MD, b, hder, disk_visible
+            y,
+            300.0,
+            -0.02,
+            alpha[i],
+            beta[j],
+            M,
+            rho0,
+            z0,
+            MD,
+            b,
+            hder,
+            disk_visible,
+            disk_outer,
         )
 
     return (Mat, Mz, Mphi)

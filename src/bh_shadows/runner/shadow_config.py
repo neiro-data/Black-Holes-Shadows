@@ -12,7 +12,15 @@ from pathlib import Path
 
 from bh_shadows.plots.weyl_plot import PALETTES
 
-BACKGROUNDS = ("palette", "black_hole", "two_color", "greyscale", "four_color", "image")
+BACKGROUNDS = (
+    "palette",
+    "black_hole",
+    "two_color",
+    "greyscale",
+    "four_color",
+    "image",
+    "shaded_disk",
+)
 HALF_ANGLE_DEFAULT = 0.5880026035  # arctan(10 / 15), the legacy field of view
 RUNS_DIR = Path("runs")
 _STAMP_RE = re.compile(r"\d{8}_\d{6}")
@@ -45,12 +53,14 @@ class ShadowConfig:
     distance: float = 15.0
     theta0: float = 90.0
     off_plane: bool = False
+    z0: float | None = None
     # grid
     n: int = 160
     half_angle: float = HALF_ANGLE_DEFAULT
     # tracer
     disk_visible_opt: str | bool = "auto"
     parallel: bool = True
+    disk_outer: float = math.inf
     backend_opt: str = "auto"
     device_opt: str = "auto"
     # matrix (Weyl only)
@@ -110,6 +120,17 @@ class ShadowConfig:
             )
         if self.off_plane and self.backend != "weyl":
             raise ValueError(f"off_plane needs the Weyl backend, got backend={self.backend!r}")
+        if self.z0 is not None:
+            if self.backend != "weyl":
+                raise ValueError(f"z0 needs the Weyl backend, got backend={self.backend!r}")
+            if not self.off_plane:
+                raise ValueError("z0 needs off_plane = true")
+            if not math.isfinite(self.z0) or abs(self.z0) >= self.distance:
+                raise ValueError(f"z0 must be finite with |z0| < distance, got {self.z0}")
+        if not self.disk_outer > self.b:
+            raise ValueError(f"disk_outer must be > b, got {self.disk_outer}")
+        if math.isfinite(self.disk_outer) and self.backend != "weyl":
+            raise ValueError("a finite disk_outer needs the Weyl backend")
         if self.backend_opt not in ("auto", "weyl", "kerr"):
             raise ValueError(f"backend must be auto|weyl|kerr, got {self.backend_opt!r}")
         if self.device_opt not in ("auto", "cpu", "gpu"):
@@ -122,7 +143,9 @@ class ShadowConfig:
             )
         if self.background not in BACKGROUNDS:
             raise ValueError(f"background must be one of {BACKGROUNDS}, got {self.background!r}")
-        if self.grid and self.background in ("palette", "black_hole"):
+        if self.background == "shaded_disk" and self.backend != "weyl":
+            raise ValueError("background 'shaded_disk' is Weyl-only")
+        if self.grid and self.background in ("palette", "black_hole", "shaded_disk"):
             raise ValueError(f"grid is not supported with background {self.background!r}")
         if not 0 < self.grid_step_deg <= 90:
             raise ValueError(f"grid_step_deg must satisfy 0 < x <= 90, got {self.grid_step_deg}")
@@ -160,6 +183,13 @@ class ShadowConfig:
         if self.backend_opt != "auto":
             return self.backend_opt
         return "kerr" if self.a != 0 else "weyl"
+
+    @property
+    def observer_z(self) -> float:
+        """Observer z in Weyl units: `z0`, else `OBSERVER_Z_OFFSET` if `off_plane`, else 0."""
+        if self.z0 is not None:
+            return self.z0
+        return OBSERVER_Z_OFFSET if self.off_plane else 0.0
 
     @property
     def disk_visible(self) -> bool:
@@ -213,10 +243,13 @@ class ShadowConfig:
             "distance": self.distance,
             "theta0": self.theta0,
             "off_plane": self.off_plane,
+            "z0": self.z0,
+            "observer_z": self.observer_z if weyl else None,
             "n": self.n,
             "half_angle": self.half_angle,
             "disk_visible": self.disk_visible,
             "parallel": self.parallel,
+            "disk_outer": self.disk_outer if math.isfinite(self.disk_outer) else None,
             "device_opt": self.device_opt,
             "matrix_source": self.matrix_source if weyl else None,
             "n_grid": self.n_grid if weyl else None,
@@ -256,7 +289,7 @@ class ShadowConfig:
         for key in ("M", "a", "MD", "b"):
             if key in raw.get("spacetime", {}):
                 flat[key] = raw["spacetime"][key]
-        for key in ("distance", "theta0", "off_plane"):
+        for key in ("distance", "theta0", "off_plane", "z0"):
             if key in raw.get("observer", {}):
                 flat[key] = raw["observer"][key]
         for key in ("n", "half_angle"):
@@ -265,6 +298,8 @@ class ShadowConfig:
         tr = raw.get("tracer", {})
         if "disk_visible" in tr:
             flat["disk_visible_opt"] = tr["disk_visible"]
+        if "disk_outer" in tr:
+            flat["disk_outer"] = float(tr["disk_outer"])
         if "parallel" in tr:
             flat["parallel"] = tr["parallel"]
         if "backend" in tr:
@@ -312,13 +347,15 @@ class ShadowConfig:
         disk_s = f'"{disk}"' if isinstance(disk, str) else str(disk).lower()
         # Only the `palette` background reads `palette`; omit it elsewhere so it does not mislead.
         palette_s = f'palette = "{d["palette"]}"\n' if d["background"] == "palette" else ""
+        z0_s = f"z0 = {d['z0']}\n" if d["z0"] is not None else ""
         return (
             f'name = "{self.run_name}"\n\n'
             f"[spacetime]\nM = {d['M']}\na = {d['a']}\nMD = {d['MD']}\nb = {d['b']}\n\n"
             f"[observer]\ndistance = {d['distance']}\ntheta0 = {d['theta0']}\n"
-            f"off_plane = {str(d['off_plane']).lower()}\n\n"
+            f"off_plane = {str(d['off_plane']).lower()}\n{z0_s}\n"
             f"[grid]\nn = {d['n']}\nhalf_angle = {d['half_angle']}\n\n"
             f"[tracer]\ndisk_visible = {disk_s}\nparallel = {str(d['parallel']).lower()}\n"
+            f"disk_outer = {d['disk_outer']}\n"
             f'backend = "{d["backend_opt"]}"\ndevice = "{d["device_opt"]}"\n\n'
             f'[matrix]\nn_grid = {d["n_grid"]}\nsource = "{d["source_opt"]}"\n\n'
             f'[plot]\n{palette_s}background = "{d["background"]}"\n'

@@ -23,6 +23,8 @@ capture -> `[0.001, 0.001]`, disk hit -> `[rho, z + 50]`) plus the traced `phi`,
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from bh_shadows.core import weyl_core as wc
@@ -187,7 +189,7 @@ inline void init_ray(float alpha, float beta, thread P& p, thread float* y) {{
   y[0] = p.rho0;
   y[1] = cos(alpha)*cos(beta)/sqrt(p.grr0);
   y[2] = p.z0;
-  y[3] = sin(alpha)/sqrt(p.gzz0);
+  y[3] = -sin(alpha)/sqrt(p.gzz0);
   y[4] = 0.f;
 }}
 """
@@ -206,6 +208,7 @@ float orho = y[0], oz = y[2];
 int st = 0;
 bool done = nu_val(y[0], y[2], p) <= -3.f || esc_r(y[0], y[2], p) >= 30.f;
 float zprev = y[2];
+float rout = prm[10];
 for (int step = 0; !done; step++) {{
   if (step >= {MAX_STEPS}) {{ st = 3; break; }}
   float y4[5];
@@ -234,7 +237,8 @@ for (int step = 0; !done; step++) {{
       || !isfinite(y[4])) {{ st = 3; break; }}
   if (esc_r(y[0], y[2], p) >= 30.f) break;
   else if (nu_val(y[0], y[2], p) <= -3.f) {{ orho = 0.001f; oz = 0.001f; break; }}
-  else if (p.vis != 0 && y[0] > p.b && sgn(y[2]) == -sgn(zprev)) {{ oz = y[2] + 50.f; break; }}
+  else if (p.vis != 0 && y[0] > p.b && y[0] < rout && sgn(y[2]) == -sgn(zprev))
+  {{ oz = y[2] + 50.f; break; }}
   zprev = y[2];
 }}
 out_rho[idx] = orho; out_z[idx] = oz; out_phi[idx] = y[4]; out_st[idx] = st;
@@ -326,7 +330,7 @@ def _observer_prm(rho0, z0, M, MD, b, disk_visible) -> list[float]:
     ]
 
 
-def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
+def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam, disk_outer=math.inf):
     """Trace one ray for each pixel on the GPU. GPU version of `weyl_core.f_paral`.
 
     Parameters
@@ -341,6 +345,8 @@ def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
         Stop rays at the disk.
     lam : np.ndarray
         Lambda table (`weyl_core.Mat_nu`).
+    disk_outer : float, optional
+        Outer visible disk radius. Infinity is sent as 1e30 (Metal fast-math has no inf).
 
     Returns
     -------
@@ -353,6 +359,7 @@ def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
     lam = _check_lam(lam)
     alpha, beta = np.asarray(alpha), np.asarray(beta)
     na, nb = len(alpha), len(beta)
+    rout = disk_outer if math.isfinite(disk_outer) else 1e30
     res = gb.launch(
         "weyl_trace",
         _HEADER,
@@ -360,7 +367,7 @@ def f_paral_gpu(rho0, z0, M, MD, b, alpha, beta, disk_visible, lam):
         {
             "alpha": alpha,
             "beta": beta,
-            "prm": np.array(_observer_prm(rho0, z0, M, MD, b, disk_visible)),
+            "prm": np.array([*_observer_prm(rho0, z0, M, MD, b, disk_visible), rout]),
             "lam": lam,
         },
         {"out_rho": np.float32, "out_z": np.float32, "out_phi": np.float32, "out_st": np.int32},

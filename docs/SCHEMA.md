@@ -51,11 +51,27 @@ radius, and the sky distorts when the observer is close to it.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `off_plane` | bool | `false` | Put the Weyl observer at `z = OBSERVER_Z_OFFSET` (a small constant in `shadow_config.py`) instead of `z = 0`. |
+| `off_plane` | bool | `false` | Put the Weyl observer above the plane instead of at `z = 0`. |
+| `z0` | float | none | Observer height in Weyl units. Needs `off_plane = true`, Weyl, finite, `abs(z0) < distance`. Elevation is about `atan(z0 / distance)` (5 deg at distance 15 is `z0` about 1.3). |
+
+The observer height (`ShadowConfig.observer_z`) is `z0` if set, else `OBSERVER_Z_OFFSET` (0.07, in
+`shadow_config.py`) when `off_plane` is true, else 0. `run.json` stores `z0` and `observer_z`.
+Orientation: for both backends `alpha > 0` looks up and `beta > 0` looks left. The Weyl tracer
+negates the initial `dz/dlambda` because rays are traced backward, so the top image rows end at `z > 0`.
 
 Only the Weyl backend (with or without a disk) accepts `true`. Kerr raises `ValueError`. The
 vertical (alpha) mirror symmetry is lost, so the runner traces all alpha rows and half of the beta
 columns, then mirrors the columns. This doubles the ray count. With `false` the output does not change.
+
+## Config key — [tracer] disk_outer
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `disk_outer` | float | `inf` | Outer visible radius of the disk. A plane crossing at `rho >= disk_outer` is not a disk hit; the ray goes on. |
+
+A visibility cut only: the metric (the Morgan-Morgan disk) is unchanged. Must be greater than `b`.
+A finite value needs the Weyl backend. It has no effect with `disk_visible = false`. In `run.json`
+infinity is stored as `null`. In `config.resolved.toml` it is written as `inf`.
 
 ## Config keys — [plot]
 
@@ -64,8 +80,8 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 | key | values | default | notes |
 | --- | --- | --- | --- |
 | `palette` | colormap name | `"grey_black_white"` | used only when `background = "palette"` |
-| `background` | `palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image` | `"palette"` | `palette` is the legacy `plot_status` image |
-| `grid` | bool | `false` | celestial-sphere lines; an error with `palette` and `black_hole` |
+| `background` | `palette`, `black_hole`, `two_color`, `greyscale`, `four_color`, `image`, `shaded_disk` | `"palette"` | `palette` is the legacy `plot_status` image |
+| `grid` | bool | `false` | celestial-sphere lines; an error with `palette`, `black_hole` and `shaded_disk` |
 | `grid_step_deg` | float | `10.0` | 0 < x <= 90 |
 | `grid_width_deg` | float | `0.4` | 0 < x < step/2 |
 | `grid_mode` | str | `"theta"` | `theta` or `flat_angle` (Weyl only: lines straight in flat space, bent by the black hole); needs `grid = true` |
@@ -79,10 +95,14 @@ All keys are optional. Visuals are a post-process of the saved arrays; they do n
 
 Colours: `four_color` is upper-left red, upper-right green, lower-left yellow, lower-right blue;
 `two_color` is red (upper) over blue (lower); `greyscale` is a grey sky with a white disk;
-`black_hole` is white sky and black shadow. Captured pixels are black, failed pixels red.
+`black_hole` is white sky and black shadow. `shaded_disk` (Weyl only; no grid) is a black sky and
+shadow with only the disk drawn, white at `rho = b` and fading outward as `(b / rho)^0.75` (floor
+0.15). Captured pixels are black, failed pixels red.
 
-Directions come from the arrays already traced. Kerr: theta is `coord2`, phi is `phi`. Weyl:
-theta is `pi - atan2(rho, z)` from `coord1`/`coord2`, and phi is the traced `phi`. An old Weyl
+Directions come from the arrays already traced.
+Old Weyl `outputs.npz` files store `coord2` with the opposite sign in plane mode (before the alpha
+sign fix); re-rendered with this code their sky colours appear vertically flipped. Kerr: theta is `coord2`, phi is `phi`. Weyl:
+theta is `atan2(rho, z)` from `coord1`/`coord2`, and phi is the traced `phi`. An old Weyl
 `outputs.npz` without `phi` uses a flat-sky phi from the pixel column
 (`pi + PHI_LEFT_SIGN * beta`) and logs a warning. A disk pixel has no direction behind the disk, so it is `disk_alpha * white` over a
 fixed dark grey (`visuals.DISK_BACKDROP`, 0.25); `greyscale` draws it opaque white.
