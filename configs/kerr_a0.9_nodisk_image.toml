@@ -20,5 +20,5 @@ n = 320
 
 [plot]
 background = "image"
-image = "examples/pillarsofcreation_composite.jpg"
+image = "examples/milky_way.jpg"
 grid = false
