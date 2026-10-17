@@ -423,6 +423,17 @@ def C323(r, a, M, theta):
 # Kept distinct from `weyl_core.run_kut4_mod` (different hmax and simpler step-halving
 # logic) since the two spacetimes are independent.
 # ---------------------------------------------------------------------------
+RKF_GROW_MAX = 4.0
+
+
+@jit(nopython=True)
+def _rkf_delta(error, tol):
+    # error == 0 when RKF4 and RKF5 agree exactly; tol/0 would raise in nopython mode.
+    if error > 0.0:
+        return pow(1.0 / 2.0, (1.0 / 4.0)) * pow(tol / error, (1.0 / 4.0))
+    return RKF_GROW_MAX
+
+
 @jit(nopython=True)
 def run_kut4_mod(F, x, y, h, *args):
     """Do one adaptive RKF45 step.
@@ -471,7 +482,7 @@ def run_kut4_mod(F, x, y, h, *args):
     y5 = y + 16 / 135 * K1 + 6656 / 12825 * K3 + 28561 / 56430 * K4 - 9 / 50 * K5 + 2 / 55 * K6
 
     error = np.linalg.norm(y5 - y4)
-    delta = pow(1.0 / 2.0, (1.0 / 4.0)) * pow(tol / error, (1.0 / 4.0))
+    delta = _rkf_delta(error, tol)
 
     while error > tol:
         h = delta * h
@@ -493,7 +504,7 @@ def run_kut4_mod(F, x, y, h, *args):
         y5 = y + 16 / 135 * K1 + 6656 / 12825 * K3 + 28561 / 56430 * K4 - 9 / 50 * K5 + 2 / 55 * K6
 
         error = np.linalg.norm(y5 - y4)
-        delta = pow(1.0 / 2.0, (1.0 / 4.0)) * pow(tol / error, (1.0 / 4.0))
+        delta = _rkf_delta(error, tol)
 
     else:
         if np.abs(h) < np.abs(hmin):

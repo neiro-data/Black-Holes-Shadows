@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from numba import jit
 
 from bh_shadows.gpu import backend as gb
 from bh_shadows.runner import run_shadow as rs
@@ -95,6 +96,68 @@ def test_kerr_gpu_agrees_with_cpu():
     assert not (mism & ~near).any()
     both_escape = (sc_ == 0) & (sg == 0)
     assert np.median(np.abs(cpu["coord2"][both_escape] - gpu["coord2"][both_escape])) < 1e-3
+
+
+def test_kerr_gpu_rkf_delta_zero_err():
+    _gpu_or_skip()
+    from bh_shadows.gpu import kerr_gpu as kg
+
+    zero = kg.rkf_delta_gpu([0.0])
+    assert np.isfinite(zero).all()
+    assert zero[0] == 4.0
+    errs = np.array([1e-8, 1e-5, 1e-4, 1e-2])
+    np.testing.assert_allclose(kg.rkf_delta_gpu(errs), 0.5**0.25 * (1e-4 / errs) ** 0.25, rtol=1e-6)
+
+
+# (alpha, beta) pixels that hit err == 0 in float32 RKF before the guard (status 3).
+_ZERO_ERR_PIXELS = [
+    (-0.5753635764122009, 0.3289022743701935),
+    (-0.46965521574020386, -0.4598886966705322),
+    (-0.4213970899581909, -0.47367674112319946),
+    (-0.39037397503852844, 0.4547181725502014),
+    (-0.3869269788265228, 0.4932098090648651),
+    (-0.3714154064655304, 0.4834432601928711),
+    (-0.36509591341018677, 0.544914960861206),
+    (-0.32545527815818787, -0.5604265332221985),
+    (-0.27662262320518494, 0.5673205256462097),
+    (-0.27202659845352173, -0.5661715269088745),
+    (-0.23181147873401642, -0.5064233541488647),
+    (-0.21515092253684998, 0.5552560091018677),
+    (-0.13069915771484375, 0.5489364862442017),
+    (-0.09910156577825546, 0.5552560091018677),
+]
+
+
+def test_kerr_gpu_zero_err_rays_escape():
+    _gpu_or_skip()
+    from bh_shadows.core import kerr_core as kc
+    from bh_shadows.gpu import kerr_gpu as kg
+
+    al = np.array([p[0] for p in _ZERO_ERR_PIXELS], dtype=np.float32)
+    be = np.array([p[1] for p in _ZERO_ERR_PIXELS], dtype=np.float32)
+    r, th, ph, st = kg.f_paral_gpu(30.0, np.pi / 2, 0.9, 1.0, al, be)
+    n = len(al)
+    assert (np.diag(st) != 3).all()
+    _, cth, cph, cst = kc.f_paral(30.0, np.pi / 2, 0.9, 1.0, al.astype(float), be.astype(float))
+    d = np.arange(n)
+    np.testing.assert_array_equal(st[d, d], cst[d, d])
+    esc = st[d, d] == 0
+    assert np.median(np.abs(th[d, d][esc] - cth[d, d][esc])) < 1e-3
+    assert np.median(np.abs(ph[d, d][esc] - cph[d, d][esc])) < 1e-3
+
+
+def test_kerr_cpu_rkf_zero_err_grows_by_four():
+    from bh_shadows.core import kerr_core as kc
+
+    @jit(nopython=True)
+    def F(x, y):
+        return np.zeros_like(y)
+
+    h_in = -0.001
+    h, x, y = kc.run_kut4_mod(F, 0.0, np.ones(5), h_in)
+    assert np.isfinite(h)
+    assert h == pytest.approx(4 * h_in)
+    np.testing.assert_array_equal(y, np.ones(5))
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,13 @@ MAX_RETRIES = 50
 _HEADER = """
 #define TOL 1e-4f
 #define HMAX (-0.02f)
+#define RKF_GROW_MAX 4.0f
+
+// err == 0 happens when float32 RKF4 and RKF5 agree bit-exactly (straight rays far out).
+// pow(TOL/0) = +inf would make h infinite, so use a bounded growth factor in that case only.
+inline float rkf_delta(float err) {
+  return err > 0.0f ? pow(0.5f, 0.25f)*pow(TOL/err, 0.25f) : RKF_GROW_MAX;
+}
 
 struct P { float a, M, r0, th0, pt, pphi; };
 
@@ -193,15 +200,15 @@ for (int step = 0; y[0] > r_h; step++) {{
   if (step >= {MAX_STEPS}) {{ st = 3; break; }}
   float y4[5];
   float err = rkf(y, h, p, y4);
-  float delta = pow(0.5f, 0.25f)*pow(TOL/err, 0.25f);
+  float delta = rkf_delta(err);
   int tries = 0;
   while (err > TOL && tries < {MAX_RETRIES}) {{
     h = delta*h;
     err = rkf(y, h, p, y4);
-    delta = pow(0.5f, 0.25f)*pow(TOL/err, 0.25f);
+    delta = rkf_delta(err);
     tries++;
   }}
-  if (err > TOL) {{ st = 3; break; }}
+  if (!(err <= TOL)) {{ st = 3; break; }}
   if (fabs(h) < fabs(hmin)) h = hmin;
   else if (fabs(h) > fabs(HMAX)) h = HMAX;
   else h = delta*h;
@@ -224,6 +231,13 @@ float z[5], o[5];
 for (int i = 0; i < 5; i++) z[i] = zin[idx*5 + i];
 geo(z, p, o);
 for (int i = 0; i < 5; i++) out[idx*5 + i] = o[i];
+"""
+
+# Debug kernel: evaluates the RKF step-size factor at given errors.
+_DELTA = """
+uint idx = thread_position_in_grid.x;
+if (idx >= (uint)errs_shape[0]) return;
+out[idx] = rkf_delta(errs[idx]);
 """
 
 
@@ -296,3 +310,21 @@ def geo_gpu(states, r0, theta0, a, M, alpha, beta):
         out_len=states.size,
     )
     return res["out"].astype(np.float64).reshape(-1, 5)
+
+
+def rkf_delta_gpu(errs):
+    """Evaluate the RKF step-size factor on the GPU. For tests of the `err == 0` guard.
+
+    Parameters
+    ----------
+    errs : array_like
+        Step errors.
+
+    Returns
+    -------
+    np.ndarray
+        Step-size factors, same length as `errs`.
+    """
+    errs = np.asarray(errs, dtype=np.float32).ravel()
+    res = gb.launch("kerr_delta", _HEADER, _DELTA, {"errs": errs}, {"out": np.float32}, len(errs))
+    return res["out"].astype(np.float64)

@@ -112,6 +112,7 @@ The float32 type causes these changes:
 - **Step-size floor.** `HMIN_GPU = -1e-5`. Smaller steps do not change a float32 state.
 - **Limits.** Each ray has a step limit (`MAX_STEPS`) and each step has a retry limit
   (`MAX_RETRIES`). A ray that reaches a limit gets status 3. The CPU has no limits.
+  A Kerr step with error 0 grows by a fixed factor of 4. A NaN error gives status 3.
 - **Non-finite state.** A NaN or Inf state gives status 3. The CPU continues or returns NaN.
 - **Weyl derivatives.** The CPU uses a central difference with `h = 1e-6`. In float32 that step
   gives only noise. The GPU uses analytic derivatives for the Schwarzschild part. For the disk
